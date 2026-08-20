@@ -1,13 +1,11 @@
 # cmdflare
 
-**The whole Cloudflare API on your command line.** `cmdflare` turns every endpoint of the official
-[Cloudflare TypeScript SDK](https://github.com/cloudflare/cloudflare-typescript) into a command
-(2,500+ of them, generated from the SDK so coverage tracks upstream), with:
+[![npm](https://img.shields.io/npm/v/cmdflare)](https://www.npmjs.com/package/cmdflare)
+[![CI](https://github.com/pedrogmbh/cmdflare/actions/workflows/release.yml/badge.svg)](https://github.com/pedrogmbh/cmdflare/actions/workflows/release.yml)
+[![node](https://img.shields.io/node/v/cmdflare)](https://www.npmjs.com/package/cmdflare)
+[![license](https://img.shields.io/github/license/pedrogmbh/cmdflare)](LICENSE)
 
-- **Non-interactive mode** for scripts and CI: predictable flags, JSON by default when piped, meaningful exit codes, `--no-input`, `--yes`, `--dry-run`.
-- **Interactive mode** for humans: fuzzy command search, guided prompts for every parameter, pickers for zones/accounts, and the equivalent one-liner printed for reuse.
-- **Smart defaults**: zone/account by *name* (`--zone example.com`), profiles, env vars, auto-pagination, table/JSON/YAML/CSV output, `--query` selection.
-- **Escape hatch**: `cmdflare api <METHOD> <path>` calls any REST endpoint, even ones the SDK does not model yet.
+The Cloudflare API, as a command. List DNS, purge cache, ship Workers — from a terminal or from CI. 2,500+ commands, generated from the [official SDK](https://github.com/cloudflare/cloudflare-typescript).
 
 ```
 $ cmdflare dns records list --zone example.com
@@ -21,155 +19,118 @@ $ cmdflare dns records create --zone example.com --type A --name api --content 2
 $ cmdflare workers scripts list -A "My Account" --all -q '[*].id'
 ```
 
-## Install
+## Try it
 
 ```bash
-# with bun (recommended for development)
-bun install
-bun run build            # generates the command manifest and bundles dist/cli.js
-bun link                 # makes `cmdflare` available on your PATH
-
-# or run from source
-bun src/cli.ts --help
-
-# once published: npx cmdflare / bunx cmdflare
+npm i -g cmdflare          # Node.js ≥ 20; or: bunx cmdflare / npx cmdflare
+cmdflare auth login        # paste a Cloudflare API token
+cmdflare zones list
 ```
 
-Requires Bun ≥ 1.1 for development; the built CLI runs on Node.js ≥ 20 or Bun.
-
-## Authenticate
+Create a token at [API Tokens](https://dash.cloudflare.com/profile/api-tokens) (user) or **Manage Account → Account API Tokens** (account-owned, `cfat_…`). Then:
 
 ```bash
-cmdflare auth login                 # prompts for an API token, verifies it, stores it in a profile
-cmdflare auth login --token "$CF_TOKEN" -p ci   # non-interactive, into profile "ci"
-cmdflare auth status                # what credentials/account/zone are in effect (exit 3 if invalid)
-cmdflare auth whoami
-cmdflare auth logout
+cmdflare dns records list --zone example.com
+cmdflare cache purge --zone example.com --purge-everything --yes
 ```
 
-Credentials are looked up in this order: `--token` flag → `CLOUDFLARE_API_TOKEN` (also
-`CLOUDFLARE_TOKEN`, `CF_API_TOKEN`) → `CLOUDFLARE_API_KEY` + `CLOUDFLARE_EMAIL` → the active profile.
+Or skip login and export `CLOUDFLARE_API_TOKEN` (also `CLOUDFLARE_TOKEN` / `CF_API_TOKEN`).
 
-Tokens: user API tokens (`cfut_…`, or unprefixed legacy) from
-<https://dash.cloudflare.com/profile/api-tokens>, and **account-owned** tokens (`cfat_…`) from
-**Manage Account → Account API Tokens**. Both are sent as `Authorization: Bearer`. `cmdflare auth`
-verifies `cfat_` tokens via the account (`/accounts/{id}/tokens/verify`), not `/user/tokens/verify`
-(which those tokens reject). Global API keys (`cfk_…`) still need `--api-key` + `--email`.
+## Interactive
 
-Config lives in `~/.config/cmdflare/config.json` (`cmdflare config path`). Profiles hold a token plus
-default `account_id` / `zone_id`:
+Run `cmdflare` with no arguments. Type `dns records`, pick a zone by name, fill the rest. It prints the equivalent one-liner so you can paste it into a script later.
 
-```bash
-cmdflare config set account_id 8c7434c9906dab3c23d2dd5d46fbb649
-cmdflare config set zone_id example.com          # names are resolved on use
-cmdflare config set output yaml                  # default TTY output format
-cmdflare config use staging                      # switch profiles (or -p staging / CMDFLARE_PROFILE)
-```
+Same idea for a partial path: `cmdflare dns records` opens that menu. On a TTY, missing flags are prompted instead of failing — `cmdflare dns records get` will ask for the record and the zone.
 
-## Command structure
+## Commands
 
 ```
 cmdflare <resource> [<subresource>...] <command> [arguments] [flags]
 ```
 
-Resources mirror the SDK / API docs: `zones`, `dns records`, `workers scripts`, `kv namespaces values`,
-`zero-trust access applications`, `r2 buckets`, `rulesets`, … Commands are the SDK methods:
-`list`, `get`, `create`, `update`, `edit`, `delete`, plus specific ones (`purge`, `verify`, `rotate`…).
-Both `kebab-case` and `camelCase` spellings work; `ls`/`rm`/`show`/`add` are aliases.
-
-Discover commands:
+Resources match the API: `zones`, `dns records`, `workers scripts`, `kv namespaces values`, `r2 buckets`, `zero-trust access applications`, `rulesets`, … Commands are SDK methods (`list`, `get`, `create`, `update`, `edit`, `delete`, plus `purge`, `verify`, `rotate`, …). `kebab-case` and `camelCase` both work; `ls` / `rm` / `show` / `add` are aliases.
 
 ```bash
-cmdflare --help                      # overview + all top-level resources
-cmdflare dns --help                  # subresources and commands under dns
-cmdflare dns records create --help   # arguments, required/optional flags, HTTP route, examples
-cmdflare search purge cache          # full-text search across all commands
-cmdflare help --tree zero-trust      # the whole command tree under a resource
+cmdflare --help
+cmdflare dns --help
+cmdflare dns records create --help
+cmdflare search purge cache
+cmdflare help --tree zero-trust
 ```
 
-### Arguments and flags
+Path ids are positional (`cmdflare dns records get <dns-record-id>`). Everything else is a `--flag` named after the API field. Zones and accounts accept **names**: `--zone example.com`, `-A "Acme Corp"` (or `CLOUDFLARE_ZONE_ID` / `CLOUDFLARE_ACCOUNT_ID`, or a profile default).
 
-- Resource ids that are part of the URL path are **positional** (`cmdflare dns records get <dns-record-id>`).
-- Everything else is a `--flag` named after the API field (`--per-page`, `--proxied`, `--ttl 3600`).
-  Types are enforced from the SDK: booleans (`--proxied`, `--proxied=false`), numbers, enums (validated), arrays
-  (`--tags a,b` or `--tags '["a","b"]'` or repeated flags), objects (`--settings '{"ipv4_only":true}'` or
-  nested flags `--settings.ipv4-only true`), file uploads (`--value ./file.bin`, `@-` for stdin).
-- `--zone-id` / `--account-id` are filled automatically from `-Z/--zone`, `-A/--account`,
-  `CLOUDFLARE_ZONE_ID` / `CLOUDFLARE_ACCOUNT_ID`, or the profile. Names are accepted and resolved
-  (`--zone example.com`, `-A "Acme Corp"`).
-- Any flag value can come from a file or stdin: `--description @notes.txt`, `--data @-`.
-- Pass the whole request at once with `-d/--data '{…}'` (JSON or YAML, `@file`, `@-`), or set nested
-  values with `--set key.path=value`. Flags override `--data`.
-- If a command has a parameter that happens to share a name with a global flag (for example
-  `--data` on `dns records create`, or `--limit` on cursor-paginated lists), the **parameter wins**;
-  use the short form (`-d`, `-q`, `-o`, …) or `--cf-<flag>` for the global one. `--help` tells you.
+## Scripts and CI
 
-### Output
-
-| Flag | Effect |
-| --- | --- |
-| `-o table` (TTY default) | Columns picked automatically (id, name, status, …), fits the terminal |
-| `-o json` / `--json` (default when piped) | Pretty JSON (`--compact` for one line) |
-| `-o yaml`, `-o csv`, `-o tsv`, `-o ndjson`, `-o raw`, `-o id` | … |
-| `-q, --query <path>` | Select data: `[*].name`, `result.items[0].id`, `[?status==active].id`, `a.b` |
-| `--fields id,name,account.name` | Restrict columns / keys |
-| `--all` / `--limit <n>` | Auto-paginate every page / cap the number of items |
-| `--include-meta` | Wrap as `{result, result_info, has_more}` |
-| `--raw-response` | Print the API envelope (`success`, `errors`, `messages`, `result`) |
-| `--output-file <path>` | Write output (or binary downloads) to a file |
-
-Data goes to **stdout**, everything else (hints, spinners, errors) to **stderr**.
-
-### Safety and CI
-
-- Destructive commands (`delete`, `purge`, `rotate`, `revoke`, …) ask for confirmation on a TTY;
-  non-interactively they require `--yes`.
-- `--dry-run` prints the exact HTTP request (method, URL, headers, JSON body) without sending it; `--curl`
-  prints an equivalent `curl` command.
-- `--no-input` (or `CMDFLARE_NO_INPUT=1`, or `CI=true`) never prompts: missing required values fail with exit 2.
-- Exit codes: `0` ok · `1` API/other error · `2` usage error · `3` authentication · `4` not found ·
-  `5` rate limited · `130` cancelled.
-- `-v/--verbose` logs every request/response (status, timing, `cf-ray`) to stderr.
+JSON when piped, tables on a TTY. Destructive commands ask on a TTY and need `--yes` otherwise. `--no-input` (or `CI=true`) never prompts.
 
 ```yaml
-# GitHub Actions example
 - run: bunx cmdflare cache purge --zone example.com --purge-everything --yes
   env:
     CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
 ```
 
-## Interactive mode
+Exit codes: `0` ok · `1` API/other · `2` usage · `3` auth · `4` not found · `5` rate limited · `130` cancelled.
 
-Run `cmdflare` with no arguments in a terminal (or `cmdflare interactive`, `cmdflare -i`, or a partial
-path like `cmdflare dns records`):
+## Output
 
-1. **Search** commands by typing (`dns records list`, `purge cache`) or browse the resource tree.
-2. Fill **positional ids** and **required parameters** through typed prompts (enums become menus,
-   zones/accounts/DNS records become searchable pickers). Large accounts prefetch several pages, then
-   typing searches the API (`name=contains:…` for zones, `search=` for DNS records) instead of only
-   the first 50 items. Objects can be filled field by field or as JSON.
-3. Optionally add any of the **optional parameters**.
-4. See the **equivalent command line** (copy it into your scripts/CI), confirm, run.
-5. Inspect the result as table / JSON / YAML, save it to a file, fetch remaining pages, run another.
+| Flag | Effect |
+| --- | --- |
+| `-o table` (TTY default) | Columns picked automatically, fits the terminal |
+| `-o json` / `--json` (piped default) | Pretty JSON (`--compact` for one line) |
+| `-o yaml`, `-o csv`, `-o tsv`, `-o ndjson`, `-o raw`, `-o id` | … |
+| `-q, --query <path>` | Select data: `[*].name`, `[?status==active].id` |
+| `--fields id,name,account.name` | Restrict columns / keys |
+| `--all` / `--limit <n>` | Every page / cap items |
+| `--dry-run` / `--curl` | Print the request (or a `curl`) without sending it |
 
-Missing required values are also prompted for in normal mode when you are on a TTY — e.g.
-`cmdflare dns records get` will ask for the record id and zone instead of failing.
+Stdout is data. Hints, spinners, and errors go to stderr.
 
-## Raw API access
+## Flags in more detail
+
+- Types come from the SDK: booleans (`--proxied`, `--proxied=false`), numbers, enums, arrays (`--tags a,b` or JSON or repeated flags), objects (`--settings '{"ipv4_only":true}'` or `--settings.ipv4-only true`), files (`--value ./file.bin`, `@-` for stdin).
+- `--description @notes.txt` and `--data @-` read a file or stdin.
+- `-d/--data '{…}'` (JSON or YAML) sets the whole body; `--set key.path=value` patches nested fields; flags win over `--data`.
+- If a parameter shares a name with a global flag (`--data` on DNS create, `--limit` on some lists), the **parameter wins**. Use `-d` / `-q` / `-o` or `--cf-<flag>` for the global. `--help` says which.
+- `--include-meta` wraps `{result, result_info, has_more}`. `--raw-response` prints the API envelope. `--output-file` writes downloads.
+
+## Auth and profiles
 
 ```bash
-cmdflare api /zones -P per_page=5                         # GET is the default
+cmdflare auth login
+cmdflare auth login --token "$CF_TOKEN" -p ci
+cmdflare auth status
+cmdflare auth whoami
+cmdflare auth logout
+```
+
+Lookup order: `--token` → `CLOUDFLARE_API_TOKEN` (`CLOUDFLARE_TOKEN`, `CF_API_TOKEN`) → `CLOUDFLARE_API_KEY` + `CLOUDFLARE_EMAIL` → the active profile.
+
+User tokens (`cfut_…` or older unprefixed strings) and account-owned tokens (`cfat_…`) both go out as `Authorization: Bearer`. Global API keys (`cfk_…`) still need `--api-key` and `--email`.
+
+Config is `~/.config/cmdflare/config.json` (`cmdflare config path`). A profile stores the token plus optional default account/zone:
+
+```bash
+cmdflare config set account_id 8c7434c9906dab3c23d2dd5d46fbb649
+cmdflare config set zone_id example.com          # names are resolved on use
+cmdflare config set output yaml
+cmdflare config use staging                      # or -p staging / CMDFLARE_PROFILE
+```
+
+## Raw API
+
+Any REST path, including endpoints the SDK does not model yet:
+
+```bash
+cmdflare api /zones -P per_page=5
 cmdflare api GET '/zones/{zone_id}/dns_records' -Z example.com --paginate -q '[*].name'
 cmdflare api POST '/zones/{zone_id}/purge_cache' -Z example.com -d '{"purge_everything":true}'
-cmdflare api PUT  '/accounts/{account_id}/storage/kv/namespaces/NS/values/key' -d @value.json
 cmdflare api DELETE /zones/<id>/dns_records/<rid> --yes
 ```
 
-`{account_id}` / `{zone_id}` (or `:account_id` / `:zone_id`) are filled from your context; `-P key=value`
-adds query params (GET/DELETE) or body fields; `-H 'Name: value'` adds headers; `--paginate` follows
-page/cursor pagination.
+`{account_id}` / `{zone_id}` are filled from context. `-P` is query or body; `-H` adds headers; `--paginate` follows pages.
 
-## Shell completion
+## Completion
 
 ```bash
 echo 'eval "$(cmdflare completion bash)"' >> ~/.bashrc
@@ -177,28 +138,34 @@ echo 'eval "$(cmdflare completion zsh)"'  >> ~/.zshrc
 cmdflare completion fish > ~/.config/fish/completions/cmdflare.fish
 ```
 
-## Environment variables
+## Environment
 
 | Variable | Meaning |
 | --- | --- |
 | `CLOUDFLARE_API_TOKEN` (`CLOUDFLARE_TOKEN`, `CF_API_TOKEN`) | API token |
 | `CLOUDFLARE_API_KEY` + `CLOUDFLARE_EMAIL` | Legacy global API key |
 | `CLOUDFLARE_ACCOUNT_ID`, `CLOUDFLARE_ZONE_ID` | Default account / zone (id or name) |
-| `CLOUDFLARE_BASE_URL` | API base URL (default `https://api.cloudflare.com/client/v4`) |
+| `CLOUDFLARE_BASE_URL` | API base (default `https://api.cloudflare.com/client/v4`) |
 | `CMDFLARE_PROFILE` | Config profile |
-| `CMDFLARE_CONFIG_DIR`, `CMDFLARE_CACHE_DIR` | Override config / cache locations |
+| `CMDFLARE_CONFIG_DIR`, `CMDFLARE_CACHE_DIR` | Config / cache locations |
 | `CMDFLARE_NO_INPUT`, `CI` | Never prompt |
-| `NO_COLOR`, `FORCE_COLOR` | Color control |
+| `NO_COLOR`, `FORCE_COLOR` | Color |
 
-## How it works / development
+## Development
 
-- `scripts/gen-manifest.ts` walks the installed `cloudflare` package's TypeScript declarations with the
-  TypeScript compiler API and the compiled JS, and emits `src/generated/` (a light `index.json` for startup,
-  one detail file per top-level resource, and `modules.ts` for lazy SDK imports). Re-run `bun run gen`
-  after upgrading the `cloudflare` dependency — new endpoints become commands automatically.
-- At runtime only the SDK module for the invoked resource is loaded (≈70 ms startup on Bun).
-- `bun test` runs unit tests plus end-to-end tests against a fake Cloudflare API.
-- `bun run typecheck`, `bun run build` (→ `dist/cli.js`, Node-compatible), `bun run dev -- zones list`.
+From a clone (Bun ≥ 1.1):
+
+```bash
+bun install
+bun run build            # manifest + dist/cli.js
+bun link                 # `cmdflare` on your PATH
+bun src/cli.ts --help    # or run TypeScript directly
+bun test
+bun run typecheck
+bun run dev -- zones list
+```
+
+`scripts/gen-manifest.ts` walks the `cloudflare` package and writes `src/generated/`. Re-run `bun run gen` after upgrading the SDK — new endpoints become commands. Runtime loads only the SDK module for the command you ran.
 
 ## License
 
