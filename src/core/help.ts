@@ -1,5 +1,6 @@
 /** Help rendering for root, resources and methods. */
 import { flagName } from './names';
+import { GLOBAL_NAMES, globalShort } from './globals';
 import { commandPath, countMethods, loadIndex } from './manifest';
 import type { MethodNode, ParamProp, ResourceNode, TypeSpec } from './manifest-types';
 import { c, termWidth } from './ui';
@@ -51,16 +52,29 @@ export const BUILTIN_COMMANDS: Array<[string, string]> = [
 export function wrap(text: string, width: number, indent = 0): string {
   const pad = ' '.repeat(indent);
   const out: string[] = [];
-  for (const para of text.split(/\n\s*\n/)) {
-    const words = para.replace(/\s*\n\s*/g, ' ').split(' ');
+  const wrapPara = (para: string, hang = 0) => {
+    const words = para.replace(/\s*\n\s*/g, ' ').trim().split(' ');
     let line = '';
+    let first = true;
     for (const w of words) {
-      if ((line + ' ' + w).trim().length > width - indent && line) {
-        out.push(pad + line);
+      const prefix = first ? '' : ' '.repeat(hang);
+      if ((prefix + line + ' ' + w).trim().length > width - indent && line) {
+        out.push(pad + (first ? '' : ' '.repeat(hang)) + line);
+        first = false;
         line = w;
       } else line = line ? line + ' ' + w : w;
     }
-    if (line) out.push(pad + line);
+    if (line) out.push(pad + (first ? '' : ' '.repeat(hang)) + line);
+  };
+  for (const para of text.split(/\n\s*\n/)) {
+    // Preserve bullet / numbered lists as separate items with a hanging indent.
+    const items = para.split(/\n(?=\s*(?:[-*•]|\d+[.)])\s+)/);
+    if (items.length > 1 || /^\s*(?:[-*•]|\d+[.)])\s+/.test(para)) {
+      for (const it of items) {
+        const m = it.match(/^\s*((?:[-*•]|\d+[.)])\s+)/);
+        wrapPara(it, m ? m[1]!.length : 0);
+      }
+    } else wrapPara(para);
     out.push('');
   }
   while (out.length && out[out.length - 1] === '') out.pop();
@@ -270,6 +284,15 @@ export function renderMethodHelp(path: ResourceNode[], method: MethodNode): stri
   if (method.params && !props.length) {
     lines.push('', c.bold('Params:'), `  --data '<json>'  ${c.dim(method.params.type.text ?? '')}`);
   }
+  const shadowed = props.map((p) => flagName(p.name)).filter((n) => GLOBAL_NAMES.has(n));
+  if (shadowed.length) {
+    lines.push(
+      '',
+      c.yellow('  Note: ') +
+        `this command has parameter(s) named like global flags: ${shadowed.map((n) => '--' + n).join(', ')}. Here they are the parameters; ` +
+        `use ${shadowed.map((n) => (globalShort(n) ? `-${globalShort(n)}` : `--cf-${n}`)).join('/')} (or --cf-<flag>) for the global flag.`,
+    );
+  }
   if (method.paginated) {
     lines.push('', c.bold('Pagination:'), `  Returns the first page by default. Use ${c.cyan('--all')} to fetch every page, ${c.cyan('--limit <n>')} to cap items${props.some((p) => p.name === 'per_page') ? `, ${c.cyan('--per-page <n>')} for page size` : ''}.`);
   }
@@ -278,10 +301,11 @@ export function renderMethodHelp(path: ResourceNode[], method: MethodNode): stri
   if (method.destructive) lines.push('', c.yellow('  Destructive: asks for confirmation on a TTY unless --yes is given.'));
   lines.push('', c.bold('Examples:'));
   lines.push('  ' + exampleFor(cp, method));
-  if (method.params && props.length) lines.push(`  ${BIN} ${cp}${pos ? ' ' + pos : ''} --data @params.json`);
+  if (method.params && props.length) lines.push(`  ${BIN} ${cp}${pos ? ' ' + pos : ''} ${props.some((p) => p.name === 'data') ? '-d' : '--data'} @params.json`);
   if (method.paginated) lines.push(`  ${BIN} ${cp} --all -o json -q '[*].id'`);
   lines.push('');
   lines.push(c.dim(`Any flag accepts @file / @- to read its value from a file / stdin. Nested values: --parent.child value. Global flags: ${BIN} --help`));
+  if (method.params?.type.props?.length) lines.push(c.dim(`Extra params for this request: -d '{...}' / -d @file.json (merged with flags), --set key.path=value.`));
   return lines.join('\n');
 }
 

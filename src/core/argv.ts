@@ -114,7 +114,16 @@ export function parseArgv(argv: string[], specs: FlagSpec[]): ParsedArgs {
       while (j < body.length) {
         const ch = body[j]!;
         const spec = byName.get(ch);
-        if (!spec) throw new ArgvError(`Unknown option -${ch}`);
+        if (!spec) {
+          // Unknown short option: keep it for the command layer (value = rest of token or next token).
+          const restTok = body.slice(j + 1).replace(/^=/, '');
+          if (restTok.length > 0) setUnknown(ch, restTok);
+          else if (i + 1 < argv.length && !looksLikeFlag(argv[i + 1]!)) {
+            setUnknown(ch, argv[i + 1]!);
+            i++;
+          } else setUnknown(ch, true);
+          break;
+        }
         if (spec.type === 'boolean' || spec.type === 'count') {
           setKnown(spec, true);
           j++;

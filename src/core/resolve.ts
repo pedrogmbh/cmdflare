@@ -44,7 +44,7 @@ export async function resolveZoneId(getClient: () => Promise<any>, ref: string):
   const client = await getClient();
   const mod = await sdkModules['resources/zones/zones']!();
   const zones = new mod.Zones(client);
-  const page = await withSpinner(`Resolving zone "${ref}"…`, () => zones.list({ name, per_page: 50 }));
+  const page = await withSpinner<any>(`Resolving zone "${ref}"…`, () => zones.list({ name, per_page: 50 }));
   const items: any[] = page.getPaginatedItems();
   const exact = items.filter((z) => String(z.name).toLowerCase() === name);
   if (exact.length === 0) {
@@ -69,7 +69,7 @@ export async function resolveAccountId(getClient: () => Promise<any>, ref: strin
   const client = await getClient();
   const mod = await sdkModules['resources/accounts/accounts']!();
   const accounts = new mod.Accounts(client);
-  const page = await withSpinner(`Resolving account "${ref}"…`, () => accounts.list({ name: ref, per_page: 50 }));
+  const page = await withSpinner<any>(`Resolving account "${ref}"…`, () => accounts.list({ name: ref, per_page: 50 }));
   const items: any[] = page.getPaginatedItems();
   let match = items.filter((a) => String(a.name).toLowerCase() === key);
   if (match.length === 0) match = items.filter((a) => String(a.name).toLowerCase().includes(key));

@@ -23,6 +23,31 @@ export interface InvokeResult {
   binary?: boolean;
 }
 
+/**
+ * The SDK's page-number paginators report "has next page" whenever the current page is non-empty.
+ * Use result_info when available to avoid a trailing empty request and to give accurate hints.
+ */
+export function hasMorePages(page: any): boolean {
+  const ri = page?.result_info;
+  if (ri && typeof ri === 'object') {
+    const cur = Number(ri.page ?? page?.options?.query?.page ?? 1);
+    if (ri.total_pages !== undefined && ri.total_pages !== null) return cur < Number(ri.total_pages);
+    if (ri.total_count !== undefined && ri.per_page) return cur * Number(ri.per_page) < Number(ri.total_count);
+    if (ri.cursor !== undefined || ri.cursors !== undefined) {
+      try {
+        return page.hasNextPage();
+      } catch {
+        return false;
+      }
+    }
+  }
+  try {
+    return page.hasNextPage();
+  } catch {
+    return false;
+  }
+}
+
 export async function invokeMethod(client: any, node: ResourceNode, method: MethodNode, opts: InvokeOptions): Promise<InvokeResult> {
   const resource = await instantiateResource(client, node);
   const fn = resource[method.name];
@@ -69,19 +94,14 @@ export async function invokeMethod(client: any, node: ResourceNode, method: Meth
           opts.onItem?.(it);
           if (limit && items.length >= limit) break outer;
         }
-        if (!page.hasNextPage()) break;
+        if (!hasMorePages(page)) break;
         page = await page.getNextPage();
       }
-      return { data: items, meta: { count: items.length, pages, hasMore: limit ? page?.hasNextPage?.() : false } };
+      return { data: items, meta: { count: items.length, pages, hasMore: limit && items.length >= limit ? hasMorePages(page) : false } };
     }
     const page = await promise;
     let items: any[] = page.getPaginatedItems();
-    let hasMore = false;
-    try {
-      hasMore = page.hasNextPage();
-    } catch {
-      hasMore = false;
-    }
+    let hasMore = hasMorePages(page);
     if (limit && items.length > limit) {
       items = items.slice(0, limit);
       hasMore = true;

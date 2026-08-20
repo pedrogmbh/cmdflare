@@ -1,20 +1,41 @@
 {
   "name": "cmdflare",
-  "module": "src/index.ts",
+  "version": "0.1.0",
+  "description": "Smart, complete Cloudflare API command line: every endpoint of the Cloudflare SDK as commands, with interactive (human) and non-interactive (CI) modes.",
+  "license": "GPL-3.0",
   "type": "module",
+  "bin": {
+    "cmdflare": "./bin/cmdflare.js"
+  },
+  "main": "./dist/cli.js",
+  "files": [
+    "bin",
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "keywords": ["cloudflare", "cli", "api", "dns", "workers", "zones", "terminal"],
+  "scripts": {
+    "gen": "bun scripts/gen-manifest.ts",
+    "dev": "bun src/cli.ts",
+    "build": "bun run gen && bun scripts/build.ts",
+    "test": "bun test",
+    "typecheck": "tsc --noEmit",
+    "prepublishOnly": "bun run build && bun test"
+  },
+  "dependencies": {
+    "@inquirer/prompts": "^8.6.0",
+    "cloudflare": "^7.1.0",
+    "yaml": "^2.9.0"
+  },
   "devDependencies": {
     "@types/bun": "latest",
     "ts5": "npm:typescript@^5.9.0"
   },
   "peerDependencies": {
     "typescript": "^7"
-  },
-  "dependencies": {
-    "@inquirer/prompts": "^8.6.0",
-    "axios": "^1.19.0",
-    "cloudflare": "^7.1.0",
-    "lodash": "^4.18.1",
-    "luxon": "^3.7.2",
-    "yaml": "^2.9.0"
   }
 }

@@ -2,6 +2,7 @@
 
 const ACRONYM_FIXES: Array<[RegExp, string]> = [
   [/DDoS/g, 'Ddos'],
+  [/^dDoS/, 'ddos'],
   [/IdP/g, 'Idp'],
   [/IDs\b/g, 'Ids'],
   [/E2E/g, 'E2e'],

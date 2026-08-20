@@ -1,7 +1,7 @@
 /** auth: login / status / whoami / logout */
 import { createClient } from '../core/client';
 import { loadConfig, maskSecret, resolveContext, saveConfig, configPath, type Context, type ConfigFile } from '../core/config';
-import { CliError, EXIT, UsageError } from '../core/errors';
+import { CliError, EXIT, UsageError, formatError } from '../core/errors';
 import { formatOutput } from '../core/output';
 import { c, canPrompt, log, stdoutIsTTY, withSpinner } from '../core/ui';
 import { BUILTIN_HELP } from './index';
@@ -169,13 +169,13 @@ async function status(gf: Record<string, any>, version: string): Promise<number>
         info.expires_on = v?.expires_on ?? null;
         if (v?.status && v.status !== 'active') code = EXIT.AUTH;
       } else {
-        const u = await withSpinner('Verifying credentials…', () => client.get('/user'));
+        const u = await withSpinner<any>('Verifying credentials…', () => client.get('/user'));
         info.status = 'active';
         info.user = u?.result?.email ?? u?.result?.id;
       }
     } catch (err: any) {
       info.status = 'invalid';
-      info.error = err?.message ?? String(err);
+      info.error = formatError(err).message;
       code = EXIT.AUTH;
     }
   }
@@ -198,7 +198,7 @@ async function whoami(gf: Record<string, any>, version: string): Promise<number>
   const client = await createClient(ctx, { version });
   let data: any;
   try {
-    data = (await withSpinner('Fetching user…', () => client.get('/user')))?.result;
+    data = (await withSpinner<any>('Fetching user…', () => client.get('/user')))?.result;
   } catch {
     data = await verifyToken(client);
     data = { token: data, note: 'Token cannot read /user (needs "User Details: Read"); showing token verification instead.' };

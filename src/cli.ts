@@ -1,86 +1,24 @@
 /** cmdflare — Cloudflare API command line. Entry point. */
-import pkg from '../package.json' with { type: 'json' };
 import { ArgvError, parseArgv, type FlagSpec } from './core/argv';
-import { createClient, toCurl, type CapturedRequest } from './core/client';
+import { GLOBAL_SPECS } from './core/globals';
+import { createClient, type CapturedRequest } from './core/client';
+import { VERSION, applyGlobalUi, contextFromFlags, decideFormat, printDryRun, type GlobalFlags } from './core/runtime';
 import { argvWantsStdin, prefetchStdin } from './core/coerce';
-import { ID_RE, loadConfig, resolveContext, type Context } from './core/config';
+import { ID_RE } from './core/config';
 import { CliError, EXIT, formatError, UsageError } from './core/errors';
 import { renderMethodHelp, renderResourceHelp, renderRootHelp } from './core/help';
 import { invokeMethod } from './core/invoke';
 import { commandPath, getMethodDetail, resolveCommand, type Resolved } from './core/manifest';
 import type { MethodNode, ResourceNode } from './core/manifest-types';
-import { applyQuery, formatOutput, parseFormat, selectFields, type OutputFormat } from './core/output';
+import { applyQuery, formatOutput, selectFields } from './core/output';
 import { buildMethodFlagSpecs, buildParams, coercePositional, findMissing } from './core/params';
 import { resolveAccountId, resolveZoneId } from './core/resolve';
-import { c, canPrompt, log, setColor, setNoInput, setQuiet, setVerbose, stderrIsTTY, stdoutIsTTY, withSpinner } from './core/ui';
+import { c, canPrompt, log, stderrIsTTY, withSpinner } from './core/ui';
 import { runBuiltin, BUILTIN_NAMES } from './commands';
 
-export const VERSION: string = (pkg as any).version ?? '0.0.0';
 
-export const GLOBAL_SPECS: FlagSpec[] = [
-  { name: 'output', aliases: ['o'], type: 'string' },
-  { name: 'json', type: 'boolean' },
-  { name: 'compact', type: 'boolean' },
-  { name: 'query', aliases: ['q'], type: 'string' },
-  { name: 'fields', type: 'string' },
-  { name: 'all', type: 'boolean' },
-  { name: 'limit', type: 'number' },
-  { name: 'account', aliases: ['A'], type: 'string' },
-  { name: 'zone', aliases: ['Z'], type: 'string' },
-  { name: 'profile', aliases: ['p'], type: 'string' },
-  { name: 'token', type: 'string' },
-  { name: 'api-key', type: 'string' },
-  { name: 'email', type: 'string' },
-  { name: 'data', aliases: ['d'], type: 'string', multiple: true },
-  { name: 'set', type: 'string', multiple: true },
-  { name: 'yes', aliases: ['y'], type: 'boolean' },
-  { name: 'no-input', type: 'boolean' },
-  { name: 'interactive', aliases: ['i'], type: 'boolean' },
-  { name: 'dry-run', type: 'boolean' },
-  { name: 'curl', type: 'boolean' },
-  { name: 'raw-response', type: 'boolean' },
-  { name: 'include-meta', type: 'boolean' },
-  { name: 'output-file', type: 'string' },
-  { name: 'timeout', type: 'number' },
-  { name: 'max-retries', type: 'number' },
-  { name: 'base-url', type: 'string' },
-  { name: 'verbose', aliases: ['v'], type: 'boolean' },
-  { name: 'quiet', aliases: ['s'], type: 'boolean' },
-  { name: 'color', type: 'boolean' },
-  { name: 'help', aliases: ['h'], type: 'boolean' },
-  { name: 'version', aliases: ['V'], type: 'boolean' },
-];
+export { GLOBAL_SPECS };
 
-export type GlobalFlags = Record<string, any>;
-
-export function applyGlobalUi(gf: GlobalFlags) {
-  if (gf.color !== undefined) setColor(gf.color);
-  if (gf.verbose) setVerbose(true);
-  if (gf.quiet) setQuiet(true);
-  if (gf['no-input']) setNoInput(true);
-}
-
-export function contextFromFlags(gf: GlobalFlags): Context {
-  return resolveContext({
-    profile: gf.profile,
-    token: gf.token,
-    apiKey: gf['api-key'],
-    email: gf.email,
-    account: gf.account,
-    zone: gf.zone,
-    baseUrl: gf['base-url'],
-  });
-}
-
-export function decideFormat(gf: GlobalFlags, opts: { rawResponse?: boolean } = {}): OutputFormat {
-  if (gf.json) return 'json';
-  if (gf.output) return parseFormat(gf.output, 'json');
-  if (!stdoutIsTTY()) return 'json';
-  if (opts.rawResponse) return 'json';
-  const cfgOut = loadConfig().settings?.output;
-  if (cfgOut) return parseFormat(cfgOut, 'table');
-  return 'table';
-}
 
 async function run(argv: string[]): Promise<number> {
   if (argvWantsStdin(argv)) await prefetchStdin();
@@ -309,30 +247,6 @@ export async function runMethod(res: Resolved, method: MethodNode, argv: string[
     );
   }
   return EXIT.OK;
-}
-
-export function printDryRun(captured: CapturedRequest[], curl: boolean) {
-  if (!captured.length) {
-    log.warn('No request was captured (the SDK did not issue an HTTP call).');
-    return;
-  }
-  for (const req of captured) {
-    if (curl) {
-      process.stdout.write(toCurl(req) + '\n');
-      continue;
-    }
-    process.stdout.write(`${c.bold(req.method)} ${req.url}\n`);
-    for (const [k, v] of Object.entries(req.headers)) process.stdout.write(c.dim(`  ${k}: ${v}`) + '\n');
-    if (req.body !== undefined) {
-      let body = req.body;
-      try {
-        body = JSON.stringify(JSON.parse(req.body), null, 2);
-      } catch {
-        /* not JSON */
-      }
-      process.stdout.write('\n' + body + '\n');
-    } else if (req.bodyNote) process.stdout.write('\n' + c.dim(req.bodyNote) + '\n');
-  }
 }
 
 export function reportError(err: unknown): number {

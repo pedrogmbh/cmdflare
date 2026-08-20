@@ -40,7 +40,7 @@ const sdkPkg = JSON.parse(readFileSync(join(CF_DIR, 'package.json'), 'utf8'));
 function firstSentence(text: string): string {
   const t = text.replace(/\s+/g, ' ').trim();
   const m = t.match(/^(.+?[.!?])(\s|$)/);
-  return (m ? m[1] : t).slice(0, 200);
+  return (m?.[1] ?? t).slice(0, 200);
 }
 
 function cleanDoc(text: string): string {

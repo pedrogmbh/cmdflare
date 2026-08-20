@@ -12,7 +12,7 @@ export async function runBuiltin(name: string, args: string[], gf: Record<string
       process.stdout.write(`cmdflare ${version}\n`);
       return EXIT.OK;
     case 'help':
-      return runHelp(args, gf, version);
+      return runHelp(args, gf, version, argv);
     case 'auth': {
       const { runAuth } = await import('./auth');
       return runAuth(args, gf, argv, version);
@@ -48,8 +48,8 @@ export async function runBuiltin(name: string, args: string[], gf: Record<string
   }
 }
 
-function runHelp(args: string[], gf: Record<string, any>, version: string): number {
-  if (gf.tree || args[0] === '--tree' || args.includes('--tree')) {
+function runHelp(args: string[], gf: Record<string, any>, version: string, argv: string[] = []): number {
+  if (gf.tree || argv.includes('--tree')) {
     const path = args.filter((a) => a !== '--tree');
     const res = path.length ? resolveCommand(path) : undefined;
     const node = res && res.ok ? res.node : loadIndex().root;

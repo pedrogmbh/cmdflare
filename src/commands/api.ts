@@ -8,6 +8,8 @@ import { applyQuery, formatOutput, selectFields } from '../core/output';
 import { resolveAccountId, resolveZoneId } from '../core/resolve';
 import { canPrompt, log, withSpinner } from '../core/ui';
 import { BUILTIN_HELP } from './index';
+import { GLOBAL_SPECS } from '../core/globals';
+import { applyGlobalUi, contextFromFlags, decideFormat, printDryRun } from '../core/runtime';
 
 const METHODS = new Set(['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS']);
 
@@ -16,7 +18,6 @@ export async function runApi(args: string[], gf: Record<string, any>, argv: stri
     process.stdout.write(BUILTIN_HELP.api + '\n');
     return gf.help ? EXIT.OK : EXIT.USAGE;
   }
-  const { GLOBAL_SPECS, contextFromFlags, decideFormat, applyGlobalUi, printDryRun } = await import('../cli');
   const extra: FlagSpec[] = [
     { name: 'param', aliases: ['P', 'F', 'f'], type: 'string', multiple: true },
     { name: 'header', aliases: ['H'], type: 'string', multiple: true },

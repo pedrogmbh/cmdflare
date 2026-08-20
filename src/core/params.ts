@@ -3,7 +3,7 @@ import type { FlagSpec } from './argv';
 import { coerceValue, getPath, parseDataArg, resolveAt, setPath, looksLikeJson, parseStructured } from './coerce';
 import { UsageError } from './errors';
 import { suggest } from './manifest';
-import type { MethodNode, ParamProp, Positional } from './manifest-types';
+import type { MethodNode, ParamProp, Positional, TypeSpec } from './manifest-types';
 import { flagName, normKey } from './names';
 
 export const PARAM_PREFIX = 'param:';
@@ -109,8 +109,8 @@ export function buildParams(input: BuildParamsInput): Record<string, any> {
       if (!prop && !opaque) {
         throw new UsageError(`Unknown flag --${name}`, suggestFlags(root, props));
       }
-      const path = (prop ? prop.name : rootSnake) + name.slice(root.length).replace(/-([a-z0-9])/g, '_$1');
-      const leafSpec = prop ? leafTypeSpec(prop, name.slice(root.length)) : undefined;
+      const path = normalizeParamPath(props, name);
+      const leafSpec = prop ? leafTypeSpec(prop, path.slice(prop.name.length)) : undefined;
       const val = coerceFlag(raw, leafSpec ? ({ name, required: false, type: leafSpec } as ParamProp) : undefined, name);
       setPath(params, path, val);
       continue;
@@ -129,7 +129,7 @@ export function buildParams(input: BuildParamsInput): Record<string, any> {
   for (const s of input.sets ?? []) {
     const eq = s.indexOf('=');
     if (eq <= 0) throw new UsageError(`--set expects key.path=value, got "${s}"`);
-    const path = s.slice(0, eq).replace(/-([a-z0-9])/g, '_$1');
+    const path = normalizeParamPath(props, s.slice(0, eq));
     const rawVal = resolveAt(s.slice(eq + 1), 'set');
     let val: any = rawVal;
     if (looksLikeJson(rawVal)) val = parseStructured(rawVal, 'set');
@@ -145,6 +145,40 @@ export function buildParams(input: BuildParamsInput): Record<string, any> {
   if (propByName.has('zone_id') && params.zone_id === undefined && input.zoneId) params.zone_id = input.zoneId;
 
   return params;
+}
+
+/**
+ * Normalizes a dotted path typed by the user (kebab or snake segments) to the SDK's property names,
+ * converting a segment's hyphens to underscores only when that matches a known property at that level.
+ */
+export function normalizeParamPath(props: ParamProp[], path: string): string {
+  const parts = path
+    .replace(/\[(\d+)\]/g, '.$1')
+    .split('.')
+    .filter(Boolean);
+  const out: string[] = [];
+  let level: ParamProp[] | undefined = props;
+  let cur: TypeSpec | undefined;
+  for (const part of parts) {
+    if (/^\d+$/.test(part)) {
+      out.push(part);
+      cur = cur?.kind === 'array' ? cur.items : undefined;
+      level = cur?.kind === 'object' ? cur.props : undefined;
+      continue;
+    }
+    const snake = part.replace(/-/g, '_');
+    const hit = level?.find((p) => p.name === part) ?? level?.find((p) => p.name === snake);
+    if (hit) {
+      out.push(hit.name);
+      cur = hit.type;
+      level = cur.kind === 'object' ? cur.props : undefined;
+    } else {
+      out.push(level === props ? snake : part);
+      cur = undefined;
+      level = undefined;
+    }
+  }
+  return out.join('.');
 }
 
 function leafTypeSpec(prop: ParamProp, subPath: string) {

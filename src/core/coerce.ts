@@ -101,6 +101,7 @@ function coerceEnum(s: string, spec: TypeSpec, flag: string): any {
 }
 
 function coerceArray(raw: string | true, items: TypeSpec | undefined, flag: string): any[] {
+  // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
   if (raw === true) throw new UsageError(`--${flag} requires a value`);
   const text = resolveAt(raw, flag);
   const t = text.trim();
@@ -125,11 +126,22 @@ function coerceArray(raw: string | true, items: TypeSpec | undefined, flag: stri
  * Coerces a raw flag value (string, `true` for bare flags, or an array for repeated flags)
  * into the value expected by the SDK according to the manifest type spec.
  */
-export function coerceValue(raw: string | true | Array<string | true>, spec: TypeSpec | undefined, flag: string): any {
+export function coerceValue(raw: string | number | boolean | Array<string | number | boolean>, spec: TypeSpec | undefined, flag: string): any {
+  if (typeof raw === 'number') {
+    const k = spec?.kind ?? 'json';
+    if (k === 'string') return String(raw);
+    if (k === 'enum') return coerceEnum(String(raw), spec!, flag);
+    if (k === 'array') return coerceArray(String(raw), spec!.items, flag);
+    return raw;
+  }
+  if (raw === false) {
+    if (!spec || spec.kind === 'boolean' || spec.kind === 'json' || spec.kind === 'union') return false;
+    throw new UsageError(`--${flag} requires a value`);
+  }
   if (Array.isArray(raw)) {
     if (!spec || spec.kind === 'array' || spec.kind === 'json' || (spec.kind === 'union' && spec.members?.some((m) => m.kind === 'array'))) {
       const items = spec?.kind === 'array' ? spec.items : spec?.members?.find((m) => m.kind === 'array')?.items;
-      return raw.flatMap((r) => coerceArray(r, items, flag));
+      return raw.flatMap((r) => (typeof r === 'boolean' ? coerceArray(true, items, flag) : coerceArray(String(r), items, flag)));
     }
     // Non-array parameter given multiple times: last one wins.
     return coerceValue(raw[raw.length - 1]!, spec, flag);
@@ -148,8 +160,11 @@ export function coerceValue(raw: string | true | Array<string | true>, spec: Typ
       if (raw.trim() === '' || Number.isNaN(n)) throw new UsageError(`--${flag}: expected a number, got "${raw}"`);
       return n;
     }
-    case 'string':
-      return resolveAt(raw, flag);
+    case 'string': {
+      const v = resolveAt(raw, flag);
+      // Values read from @file / @- drop one trailing newline (like $(cat file)).
+      return v !== raw && v.endsWith('\n') ? v.slice(0, -1) : v;
+    }
     case 'enum':
       return coerceEnum(raw, spec!, flag);
     case 'array':

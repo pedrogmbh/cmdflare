@@ -87,11 +87,14 @@ function applyToks(value: any, toks: QTok[]): any {
       return mapped.some(Array.isArray) && rest.length > 0 ? mapped.flat() : mapped;
     } else if (tok.t === 'filter') {
       if (!Array.isArray(cur)) return undefined;
-      cur = cur.filter((el) => {
+      const filtered = cur.filter((el) => {
         const v = getPath(el, tok.k);
         const eq = String(v) === tok.v;
         return tok.op === '==' ? eq : !eq;
       });
+      const rest = toks.slice(i + 1);
+      if (!rest.length) return filtered;
+      return filtered.map((el) => applyToks(el, rest)).filter((v) => v !== undefined && v !== null);
     }
   }
   return cur;
@@ -261,7 +264,7 @@ export function flattenObject(obj: any, depth: number, prefix = ''): Record<stri
   const out: Record<string, any> = {};
   for (const [k, v] of Object.entries(obj)) {
     const key = prefix ? `${prefix}.${k}` : k;
-    if (isPlainObject(v) && depth > 0 && Object.keys(v).length > 0 && Object.keys(v).length <= 30) Object.assign(out, flattenObject(v, depth - 1, key));
+    if (isPlainObject(v) && depth > 0 && Object.keys(v as object).length > 0 && Object.keys(v as object).length <= 30) Object.assign(out, flattenObject(v, depth - 1, key));
     else out[key] = v;
   }
   return out;
@@ -274,7 +277,7 @@ function renderRows(rows: Record<string, any>[], columns?: string[]): string {
   // Desired widths
   const widths = cols.map((col) => {
     let w = col.length;
-    for (const r of rows.slice(0, 500)) w = Math.max(w, Math.min(maxCell, cellText(getPath(r, col), maxCell).length));
+    for (const r of rows.slice(0, 500)) w = Math.max(w, Math.min(maxCell, cellText(colValue(r, col), maxCell).length));
     return w;
   });
   // Fit columns into the terminal width (explicit columns are never dropped)
@@ -303,7 +306,7 @@ function renderRows(rows: Record<string, any>[], columns?: string[]): string {
     lines.push(
       chosen
         .map((i) => {
-          const text = truncate(cellText(getPath(r, cols[i]!), maxCell), widths[i]!);
+          const text = truncate(cellText(colValue(r, cols[i]!), maxCell), widths[i]!);
           return text.padEnd(widths[i]!);
         })
         .join(' '.repeat(sep))
@@ -321,7 +324,7 @@ function renderRows(rows: Record<string, any>[], columns?: string[]): string {
 function formatDelimited(data: any, delim: string, columns?: string[]): string {
   const rows: Record<string, any>[] = Array.isArray(data) ? data.map((x) => (isPlainObject(x) ? x : { value: x })) : isPlainObject(data) ? [data] : [{ value: data }];
   if (rows.length === 0) return '';
-  const cols = columns && columns.length ? columns : [...new Set(rows.flatMap((r) => Object.keys(r)))];
+  const cols = columns && columns.length ? columns : [...new Set(rows.flatMap((r) => Object.keys(r as object)))];
   const esc = (v: any) => {
     let s: string;
     if (v === null || v === undefined) s = '';
@@ -331,7 +334,12 @@ function formatDelimited(data: any, delim: string, columns?: string[]): string {
     if (delim === '\t') s = s.replace(/\t/g, ' ').replace(/\n/g, ' ');
     return s;
   };
-  return [cols.join(delim), ...rows.map((r) => cols.map((col) => esc(getPath(r, col))).join(delim))].join('\n');
+  return [cols.join(delim), ...rows.map((r) => cols.map((col) => esc(colValue(r, col))).join(delim))].join('\n');
+}
+
+function colValue(row: any, col: string): any {
+  if (row && typeof row === 'object' && col in row) return row[col];
+  return getPath(row, col);
 }
 
 export function visibleLength(s: string): number {
