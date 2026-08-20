@@ -140,7 +140,9 @@ path like `cmdflare dns records`):
 
 1. **Search** commands by typing (`dns records list`, `purge cache`) or browse the resource tree.
 2. Fill **positional ids** and **required parameters** through typed prompts (enums become menus,
-   zones/accounts become pickers loaded from your account, objects can be filled field by field or as JSON).
+   zones/accounts/DNS records become searchable pickers). Large accounts prefetch several pages, then
+   typing searches the API (`name=contains:…` for zones, `search=` for DNS records) instead of only
+   the first 50 items. Objects can be filled field by field or as JSON.
 3. Optionally add any of the **optional parameters**.
 4. See the **equivalent command line** (copy it into your scripts/CI), confirm, run.
 5. Inspect the result as table / JSON / YAML, save it to a file, fetch remaining pages, run another.

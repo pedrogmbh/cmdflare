@@ -13,7 +13,7 @@ import { formatOutput } from '../core/output';
 import { commandLineFor } from '../core/params';
 import { resolveAccountId, resolveZoneId } from '../core/resolve';
 import { c, log, withSpinner } from '../core/ui';
-import { promptIO, promptMissing, promptPositional, promptProp } from './prompts';
+import { promptIO, promptMissing, promptProp } from './prompts';
 
 export interface InteractiveOptions {
   globals: Record<string, any>;
@@ -170,11 +170,9 @@ async function runPicked(pick: Pick & { kind: 'method' }, ctx: Context, getClien
   if (method.deprecated) out(c.yellow('This command is deprecated.'));
 
   const positionals: any[] = [];
-  for (const p of method.positionals) positionals.push(await promptPositional(p));
-
   const params: Record<string, any> = {};
   const props = method.params?.type.props ?? [];
-  // Context defaults
+  // Context defaults (zone/account before positionals so DNS record pickers can search)
   if (props.some((p) => p.name === 'account_id')) {
     let id = ctx.accountId;
     if (!id && ctx.accountRef) id = await resolveAccountId(getClient, ctx.accountRef);

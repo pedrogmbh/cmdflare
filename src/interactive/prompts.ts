@@ -1,10 +1,21 @@
 /** Prompt helpers shared by interactive mode and the "missing required value" fallback. */
 import { checkbox, confirm, editor, input, search, select } from '@inquirer/prompts';
-import { sdkModules } from '../generated/modules';
+import {
+  CATALOG_PAGE_SIZE,
+  PICKER_PREFETCH_MAX,
+  itemMatches,
+  listAccounts,
+  listDnsRecords,
+  listZones,
+  mergeById,
+  zoneNameQuery,
+  type CatalogQuery,
+} from '../core/catalog';
 import { coerceValue } from '../core/coerce';
-import type { Context } from '../core/config';
+import { ID_RE, type Context } from '../core/config';
 import { CliError, EXIT } from '../core/errors';
 import { typeLabel } from '../core/help';
+import type { CollectPagesResult } from '../core/invoke';
 import type { MethodNode, ParamProp, Positional, TypeSpec } from '../core/manifest-types';
 import { flagName } from '../core/names';
 import { c, log, withSpinner } from '../core/ui';
@@ -45,38 +56,99 @@ export async function promptPositional(p: Positional): Promise<any> {
   }
 }
 
-async function pickFromApi(kind: 'zone' | 'account', helpers: PromptHelpers): Promise<string | undefined> {
-  if (!helpers.getClient || !helpers.ctx || helpers.ctx.credentials.kind === 'none') return undefined;
+type CatalogKind = 'zone' | 'account' | 'dns-record';
+
+function catalogNoun(kind: CatalogKind): string {
+  return kind === 'dns-record' ? 'DNS record' : kind;
+}
+
+function catalogLabel(kind: CatalogKind, it: any): string {
+  if (kind === 'dns-record') {
+    const typ = String(it.type ?? '').padEnd(6);
+    const name = String(it.name ?? '');
+    const content = it.content != null ? String(it.content) : '';
+    const extra = content.length > 40 ? content.slice(0, 37) + '…' : content;
+    return `${typ} ${name}${extra ? '  ' + extra : ''} ${c.dim(it.id)}`;
+  }
+  return `${it.name} ${c.dim(it.id)}`;
+}
+
+async function fetchCatalog(
+  kind: CatalogKind,
+  client: any,
+  opts: { term?: string; accountId?: string; zoneId?: string; maxItems: number; signal?: AbortSignal },
+): Promise<CollectPagesResult> {
+  const q: CatalogQuery = { maxItems: opts.maxItems, signal: opts.signal };
+  if (kind === 'zone') return listZones(client, { ...q, name: opts.term ? zoneNameQuery(opts.term) : undefined, accountId: opts.accountId });
+  if (kind === 'account') return listAccounts(client, { ...q, name: opts.term || undefined });
+  return listDnsRecords(client, { ...q, zoneId: opts.zoneId!, search: opts.term || undefined });
+}
+
+export async function pickCatalogItem(
+  kind: CatalogKind,
+  helpers: PromptHelpers,
+  opts: { message?: string; allowNone?: boolean; zoneId?: string } = {},
+): Promise<string | undefined> {
+  if (!helpers.getClient || helpers.ctx?.credentials.kind === 'none') return undefined;
+  const noun = catalogNoun(kind);
+  const accountId = helpers.ctx?.accountId;
+  const zoneId = opts.zoneId;
+  if (kind === 'dns-record' && !zoneId) return undefined;
   try {
     const client = await helpers.getClient();
-    const items: any[] = await withSpinner(`Loading ${kind}s…`, async () => {
-      if (kind === 'zone') {
-        const mod = await sdkModules['resources/zones/zones']!();
-        const page = await new mod.Zones(client).list({ per_page: 50 });
-        return page.getPaginatedItems();
-      }
-      const mod = await sdkModules['resources/accounts/accounts']!();
-      const page = await new mod.Accounts(client).list({ per_page: 50 });
-      return page.getPaginatedItems();
-    });
-    if (!items.length) return undefined;
-    const choices = items.map((it) => ({ name: `${it.name} ${c.dim(it.id)}`, value: String(it.id) }));
+    const prefetch = await withSpinner(`Loading ${noun}s…`, () =>
+      fetchCatalog(kind, client, { accountId, zoneId, maxItems: PICKER_PREFETCH_MAX }),
+    );
+    if (!prefetch.items.length && !prefetch.truncated) return undefined;
+    const none = opts.allowNone ? { name: c.dim('(none — skip)'), value: '__none__' } : undefined;
     const manual = { name: c.dim('(type an id manually)'), value: '' };
+    const hint =
+      prefetch.truncated && prefetch.total != null
+        ? { name: c.dim(`… ${prefetch.total - prefetch.items.length} more — type a name to search all ${prefetch.total}`), value: '__hint__', disabled: true }
+        : prefetch.truncated
+          ? { name: c.dim('… more not loaded — type a name to search remotely'), value: '__hint__', disabled: true }
+          : undefined;
     const picked = await search(
       {
-        message: `Select ${kind}`,
-        source: (term) => {
-          const t = (term ?? '').toLowerCase();
-          return [...choices.filter((ch) => ch.name.toLowerCase().includes(t)), manual];
-        },
+        message:
+          opts.message ??
+          (prefetch.truncated
+            ? `Select ${noun} ${c.dim(`(${prefetch.items.length}${prefetch.total != null ? ` of ${prefetch.total}` : ''} shown; type to search all)`)}`
+            : `Select ${noun}${prefetch.total != null ? c.dim(` (${prefetch.total})`) : ''}`),
         pageSize: 12,
+        source: async (term, { signal }) => {
+          const t = (term ?? '').trim();
+          let items = t ? prefetch.items.filter((it) => itemMatches(it, t)) : prefetch.items;
+          if (t && prefetch.truncated) {
+            try {
+              const remote = await fetchCatalog(kind, client, { term: t, accountId, zoneId, maxItems: CATALOG_PAGE_SIZE, signal });
+              items = mergeById(items, remote.items);
+            } catch (err: any) {
+              if (signal.aborted || err?.name === 'AbortError') return [];
+              log.debug(`Remote ${noun} search failed: ${err?.message}`);
+            }
+          }
+          const choices: Array<{ name: string; value: string; disabled?: boolean }> = items.map((it) => ({
+            name: catalogLabel(kind, it),
+            value: String(it.id),
+          }));
+          if (t && ID_RE.test(t) && !choices.some((ch) => ch.value === t)) {
+            choices.unshift({ name: `Use id ${t}`, value: t });
+          }
+          if (!t && hint) choices.push(hint);
+          if (!choices.length) choices.push({ name: c.dim('No matches'), value: '__none__', disabled: true });
+          choices.push(manual);
+          if (none) choices.push(none);
+          return choices;
+        },
       },
       promptIO(),
     );
-    return picked || undefined;
+    if (!picked || picked === '__none__' || picked === '__hint__') return undefined;
+    return picked;
   } catch (err: any) {
     if (err?.name === 'ExitPromptError') onCancel(err);
-    log.debug(`Could not list ${kind}s: ${err?.message}`);
+    log.debug(`Could not list ${noun}s: ${err?.message}`);
     return undefined;
   }
 }
@@ -87,7 +159,7 @@ export async function promptProp(p: ParamProp, helpers: PromptHelpers = {}): Pro
   const message = `${label}${p.required ? '' : c.dim(' (optional)')}${desc ? c.dim(' — ' + desc) : ''}`;
   try {
     if (p.name === 'zone_id' || p.name === 'account_id') {
-      const picked = await pickFromApi(p.name === 'zone_id' ? 'zone' : 'account', helpers);
+      const picked = await pickCatalogItem(p.name === 'zone_id' ? 'zone' : 'account', helpers);
       if (picked) return picked;
     }
     return await promptForType(p.type, message, p.required, label);
@@ -193,13 +265,34 @@ function placeholderFor(t: TypeSpec): any {
   }
 }
 
+function isDnsRecordPositional(p: Positional): boolean {
+  return p.name === 'dnsRecordID' || p.cli === 'dns-record-id';
+}
+
 /** Prompts for required positionals/params that are still missing (mutates `positionals` and `params`). */
 export async function promptMissing(method: MethodNode, positionals: any[], params: Record<string, any>, helpers: PromptHelpers): Promise<void> {
+  const props = method.params?.type.props ?? [];
+  // Zone/account first so record pickers can search the selected zone.
+  for (const p of props) {
+    if ((p.name === 'zone_id' || p.name === 'account_id') && p.required && (params[p.name] === undefined || params[p.name] === null)) {
+      const v = await promptProp(p, helpers);
+      if (v !== undefined) params[p.name] = v;
+    }
+  }
   for (let i = 0; i < method.positionals.length; i++) {
     const p = method.positionals[i]!;
-    if (p.required && (positionals[i] === undefined || positionals[i] === '')) positionals[i] = await promptPositional(p);
+    if (!p.required || (positionals[i] !== undefined && positionals[i] !== '')) continue;
+    if (isDnsRecordPositional(p) && typeof params.zone_id === 'string') {
+      const picked = await pickCatalogItem('dns-record', helpers, { zoneId: params.zone_id });
+      if (picked) {
+        positionals[i] = picked;
+        continue;
+      }
+    }
+    positionals[i] = await promptPositional(p);
   }
-  for (const p of method.params?.type.props ?? []) {
+  for (const p of props) {
+    if (p.name === 'zone_id' || p.name === 'account_id') continue;
     if (!p.required || (params[p.name] !== undefined && params[p.name] !== null)) continue;
     const v = await promptProp(p, helpers);
     if (v !== undefined) params[p.name] = v;

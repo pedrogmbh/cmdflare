@@ -108,21 +108,14 @@ async function login(gf: Record<string, any>, version: string): Promise<number> 
   // Offer a default account when there is exactly one (or let the user choose interactively).
   if (!profile.account_id) {
     try {
-      const env = await client.get('/accounts', { query: { per_page: 50 } });
-      const accounts: any[] = env?.result ?? [];
-      if (accounts.length === 1) {
-        profile.account_id = accounts[0].id;
-        log.info(`Default account: ${c.bold(accounts[0].name)} ${c.dim(accounts[0].id)}`);
-      } else if (accounts.length > 1 && canPrompt()) {
-        const { select } = await import('@inquirer/prompts');
-        const choice = await select(
-          {
-            message: 'Default account for this profile',
-            choices: [...accounts.map((a) => ({ name: `${a.name} ${c.dim(a.id)}`, value: a.id as string })), { name: c.dim('(none — pass --account per command)'), value: '' }],
-            pageSize: 12,
-          },
-          promptContext(),
-        );
+      const { listAccounts } = await import('../core/catalog');
+      const listed = await listAccounts(client, { maxItems: 2 });
+      if (listed.items.length === 1 && !listed.truncated && (listed.total == null || listed.total === 1)) {
+        profile.account_id = listed.items[0].id;
+        log.info(`Default account: ${c.bold(listed.items[0].name)} ${c.dim(listed.items[0].id)}`);
+      } else if ((listed.items.length > 1 || listed.truncated) && canPrompt()) {
+        const { pickCatalogItem } = await import('../interactive/prompts');
+        const choice = await pickCatalogItem('account', { ctx, getClient: async () => client }, { message: 'Default account for this profile', allowNone: true });
         if (choice) profile.account_id = choice;
       }
     } catch {

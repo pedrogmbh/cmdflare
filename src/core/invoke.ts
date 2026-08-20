@@ -48,6 +48,43 @@ export function hasMorePages(page: any): boolean {
   }
 }
 
+export interface CollectPagesResult {
+  items: any[];
+  truncated: boolean;
+  total?: number;
+  pages: number;
+}
+
+/** Walk an SDK paginator until it is exhausted or `maxItems` is reached. */
+export async function collectPaginatedItems(firstPage: any, opts: { maxItems?: number } = {}): Promise<CollectPagesResult> {
+  const maxItems = opts.maxItems != null && opts.maxItems > 0 ? opts.maxItems : Number.POSITIVE_INFINITY;
+  const totalRaw = firstPage?.result_info?.total_count;
+  const total = typeof totalRaw === 'number' ? totalRaw : undefined;
+  const items: any[] = [];
+  let pages = 0;
+  let page: any = firstPage;
+  let stoppedEarly = false;
+  while (page) {
+    pages++;
+    const batch: any[] = typeof page.getPaginatedItems === 'function' ? page.getPaginatedItems() : [];
+    for (const it of batch) {
+      if (items.length >= maxItems) {
+        stoppedEarly = true;
+        break;
+      }
+      items.push(it);
+    }
+    if (items.length >= maxItems) {
+      stoppedEarly = true;
+      break;
+    }
+    if (!hasMorePages(page)) break;
+    page = await page.getNextPage();
+  }
+  const truncated = stoppedEarly && (total == null || items.length < total);
+  return { items, truncated, total, pages };
+}
+
 export async function invokeMethod(client: any, node: ResourceNode, method: MethodNode, opts: InvokeOptions): Promise<InvokeResult> {
   const resource = await instantiateResource(client, node);
   const fn = resource[method.name];
