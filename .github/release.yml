@@ -1,0 +1,302 @@
+# CI/CD: typecheck, then publish to npm, then Pushover.
+#
+# Runs on every push to main, but CI + publish only proceed when the
+# `version` field in package.json is not already on the npm registry.
+# A git comparison against the previous main tip is used to detect bumps
+# (JSON-parsed, not a raw file diff). Unpublished versions still proceed
+# so a failed release can be retried without bumping again.
+#
+# npm publish uses Trusted Publishing (OIDC), not NPM_ACCESS_TOKEN.
+# Bypass-2FA granular tokens can no longer create packages / publish
+# directly: https://gh.io/npm-gat-bypass2fa-deprecation
+#
+# On npmjs.com → package → Trusted Publisher, set exactly:
+#   Organization or user: pedrogmbh
+#   Repository:           cmdflare
+#   Workflow filename:    release.yml
+#   Environment name:     Production
+#
+# First-ever publish of a new package name must be done once locally
+# with 2FA (`npm publish --access public`) so the package exists and
+# the Trusted Publisher can be attached. Later versions come from CI.
+#
+# Pushover secrets live on the GitHub Environment named "Production":
+#   PUSHOVER_API_KEY, PUSHOVER_GROUP_KEY
+name: CI/CD
+
+on:
+  push:
+    branches:
+      - main
+
+concurrency:
+  group: npm-release-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  NODE_VERSION: "26.7.x"
+  BUN_VERSION: "1.4.x"
+  NPM_REGISTRY: "https://registry.npmjs.org"
+
+jobs:
+  gate:
+    name: Version gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      version: ${{ steps.check.outputs.version }}
+      previous_version: ${{ steps.check.outputs.previous_version }}
+      package_name: ${{ steps.check.outputs.package_name }}
+      version_changed: ${{ steps.check.outputs.version_changed }}
+      already_published: ${{ steps.check.outputs.already_published }}
+      should_publish: ${{ steps.check.outputs.should_publish }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: true
+          fetch-depth: 1
+          sparse-checkout: |
+            package.json
+          sparse-checkout-cone-mode: false
+
+      - name: Detect package.json version change
+        id: check
+        env:
+          BEFORE_SHA: ${{ github.event.before }}
+        run: |
+          set -euo pipefail
+
+          NULL_SHA="0000000000000000000000000000000000000000"
+
+          read_version() {
+            python3 -c 'import json,sys; print(json.load(sys.stdin)["version"])'
+          }
+
+          read_name() {
+            python3 -c 'import json,sys; print(json.load(sys.stdin)["name"])'
+          }
+
+          package_name="$(read_name < package.json)"
+          version="$(read_version < package.json)"
+
+          if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+([-+][0-9A-Za-z.]+)*$ ]]; then
+            echo "::error::package.json version is not valid semver: ${version}"
+            exit 1
+          fi
+
+          previous_version=""
+          version_changed="true"
+
+          if [[ -z "${BEFORE_SHA}" || "${BEFORE_SHA}" == "${NULL_SHA}" ]]; then
+            echo "No previous commit on this ref; treating version as new."
+          else
+            if git fetch --depth=1 origin "${BEFORE_SHA}"; then
+              if old_json="$(git show "${BEFORE_SHA}:package.json" 2>/dev/null)"; then
+                previous_version="$(printf '%s' "${old_json}" | read_version)"
+                if [[ "${previous_version}" == "${version}" ]]; then
+                  version_changed="false"
+                fi
+              else
+                echo "package.json did not exist at ${BEFORE_SHA}; treating version as new."
+              fi
+            else
+              echo "::warning::Could not fetch ${BEFORE_SHA}; falling back to npm registry only."
+            fi
+          fi
+
+          already_published="false"
+          if published="$(npm view "${package_name}@${version}" version --registry "${NPM_REGISTRY}" 2>/dev/null)" \
+            && [[ -n "${published}" ]]; then
+            already_published="true"
+          fi
+
+          # Publish when this exact version is not on npm. That covers a
+          # real bump and a retry after CI/publish failed on the bump commit.
+          should_publish="false"
+          if [[ "${already_published}" == "false" ]]; then
+            should_publish="true"
+            if [[ "${version_changed}" == "false" ]]; then
+              echo "Version ${version} is unchanged in git but not on npm; retrying publish."
+            fi
+          fi
+
+          {
+            echo "package_name=${package_name}"
+            echo "version=${version}"
+            echo "previous_version=${previous_version}"
+            echo "version_changed=${version_changed}"
+            echo "already_published=${already_published}"
+            echo "should_publish=${should_publish}"
+          } >> "${GITHUB_OUTPUT}"
+
+          echo "package=${package_name}"
+          echo "version=${version}"
+          echo "previous=${previous_version:-<none>}"
+          echo "version_changed=${version_changed}"
+          echo "already_published=${already_published}"
+          echo "should_publish=${should_publish}"
+
+  ci:
+    name: Typecheck
+    needs: gate
+    if: needs.gate.outputs.should_publish == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Setup Bun ${{ env.BUN_VERSION }}
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+
+      - name: Setup Node.js ${{ env.NODE_VERSION }}
+        uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          check-latest: true
+          package-manager-cache: false
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Typecheck (tsc --noEmit)
+        run: bun run typecheck
+
+      - name: Test
+        run: bun test
+
+      - name: Build
+        run: bun run build
+
+  publish:
+    name: Publish to npm
+    needs: [gate, ci]
+    if: needs.gate.outputs.should_publish == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      id-token: write
+    environment:
+      name: Production
+      url: https://www.npmjs.com/package/${{ needs.gate.outputs.package_name }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Setup Bun ${{ env.BUN_VERSION }}
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+
+      - name: Setup Node.js ${{ env.NODE_VERSION }}
+        uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          check-latest: true
+          registry-url: ${{ env.NPM_REGISTRY }}
+          package-manager-cache: false
+
+      - name: Ensure npm supports trusted publishing
+        run: npm install -g npm@latest
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      # OIDC only: do not set NODE_AUTH_TOKEN. An access token (or an empty
+      # NODE_AUTH_TOKEN) makes npm skip trusted publishing and fail with E404.
+      # Provenance is generated automatically when publishing via OIDC.
+      - name: Publish ${{ needs.gate.outputs.package_name }}@${{ needs.gate.outputs.version }}
+        run: npm publish --access public
+
+  notify:
+    name: Notify Pushover
+    needs: [gate, ci, publish]
+    if: always() && !cancelled() && (needs.gate.result == 'failure' || needs.gate.outputs.should_publish == 'true' || needs.gate.outputs.version_changed == 'true')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    environment: Production
+    steps:
+      - name: Send Pushover notification
+        env:
+          PUSHOVER_API_KEY: ${{ secrets.PUSHOVER_API_KEY }}
+          PUSHOVER_GROUP_KEY: ${{ secrets.PUSHOVER_GROUP_KEY }}
+          GATE_RESULT: ${{ needs.gate.result }}
+          CI_RESULT: ${{ needs.ci.result }}
+          PUBLISH_RESULT: ${{ needs.publish.result }}
+          VERSION_CHANGED: ${{ needs.gate.outputs.version_changed }}
+          SHOULD_PUBLISH: ${{ needs.gate.outputs.should_publish }}
+          ALREADY_PUBLISHED: ${{ needs.gate.outputs.already_published }}
+          PACKAGE_NAME: ${{ needs.gate.outputs.package_name }}
+          VERSION: ${{ needs.gate.outputs.version }}
+          PREVIOUS_VERSION: ${{ needs.gate.outputs.previous_version }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+
+          if [[ -z "${PUSHOVER_API_KEY}" || -z "${PUSHOVER_GROUP_KEY}" ]]; then
+            echo "::error::Pushover secrets are missing on the Production environment."
+            exit 1
+          fi
+
+          status="failure"
+          priority="1"
+          sound="siren"
+
+          if [[ "${GATE_RESULT}" == "failure" ]]; then
+            title="CI/CD failed (version gate)"
+            body="Could not determine whether to publish ${REPO}."
+          elif [[ "${ALREADY_PUBLISHED}" == "true" ]]; then
+            status="skipped"
+            priority="0"
+            sound="pushover"
+            title="npm publish skipped"
+            body="${PACKAGE_NAME}@${VERSION} is already on npm. Git version changed from ${PREVIOUS_VERSION:-unknown} to ${VERSION}."
+          elif [[ "${CI_RESULT}" != "success" ]]; then
+            title="CI/CD failed (typecheck)"
+            body="Typecheck/tests/build failed for ${PACKAGE_NAME}@${VERSION} (was ${PREVIOUS_VERSION:-unknown})."
+          elif [[ "${PUBLISH_RESULT}" != "success" ]]; then
+            title="CI/CD failed (npm publish)"
+            body="npm publish failed for ${PACKAGE_NAME}@${VERSION}."
+          else
+            status="success"
+            priority="0"
+            sound="magic"
+            title="Published to npm"
+            body="${PACKAGE_NAME}@${VERSION} published successfully (was ${PREVIOUS_VERSION:-unknown})."
+          fi
+
+          message="$(
+            printf '%s\n\n<b>Status:</b> %s\n<b>Repo:</b> %s\n<b>Commit:</b> %s\n<b>Typecheck:</b> %s\n<b>Publish:</b> %s' \
+              "${body}" \
+              "${status}" \
+              "${REPO}" \
+              "${SHA:0:7}" \
+              "${CI_RESULT}" \
+              "${PUBLISH_RESULT}"
+          )"
+
+          curl -sS -f \
+            --form-string "token=${PUSHOVER_API_KEY}" \
+            --form-string "user=${PUSHOVER_GROUP_KEY}" \
+            --form-string "title=${title}" \
+            --form-string "message=${message}" \
+            --form-string "html=1" \
+            --form-string "priority=${priority}" \
+            --form-string "sound=${sound}" \
+            --form-string "url=${RUN_URL}" \
+            --form-string "url_title=View GitHub Actions run" \
+            https://api.pushover.net/1/messages.json
