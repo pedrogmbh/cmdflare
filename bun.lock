@@ -12,8 +12,6 @@
       "devDependencies": {
         "@types/bun": "latest",
         "ts5": "npm:typescript@^5.9.0",
-      },
-      "peerDependencies": {
         "typescript": "^7",
       },
     },
