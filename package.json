@@ -1,6 +1,6 @@
 {
   "name": "cmdflare",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "description": "Smart, complete Cloudflare API command line: every endpoint of the Cloudflare SDK as commands, with interactive (human) and non-interactive (CI) modes.",
   "license": "GPL-3.0",
   "type": "module",
