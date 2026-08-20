@@ -1,5 +1,6 @@
-import { describe, expect, test } from 'bun:test';
+import { beforeEach, describe, expect, test } from 'bun:test';
 import { applyQuery, formatOutput, selectFields } from '../src/core/output';
+import { setColor, stripAnsi } from '../src/core/ui';
 
 const rows = [
   { id: 'a1', name: 'one', status: 'active', meta: { x: 1 }, tags: ['t1', 't2'] },
@@ -21,6 +22,10 @@ describe('applyQuery', () => {
 });
 
 describe('formatOutput', () => {
+  // formatOutput colorizes JSON/table headers when stdout is a TTY (bun test)
+  // or FORCE_COLOR is set. Pin color off so string assertions are deterministic.
+  beforeEach(() => setColor(false));
+
   test('json / compact / ndjson / id / raw / yaml', () => {
     expect(formatOutput({ a: 1 }, { format: 'json' })).toBe('{\n  "a": 1\n}');
     expect(formatOutput({ a: 1 }, { format: 'json', compact: true })).toBe('{"a":1}');
@@ -38,6 +43,15 @@ describe('formatOutput', () => {
     expect(formatOutput([], { format: 'table' })).toContain('no results');
     const single = formatOutput({ id: 'x', nested: { a: 1, b: 'two' } }, { format: 'table' });
     expect(single).toContain('nested.a');
+  });
+  test('json and table headers colorize when color is on', () => {
+    setColor(true);
+    const json = formatOutput({ a: 1 }, { format: 'json' });
+    expect(json).not.toBe('{\n  "a": 1\n}');
+    expect(stripAnsi(json)).toBe('{\n  "a": 1\n}');
+    const header = formatOutput(rows, { format: 'table' }).split('\n')[0]!;
+    expect(header).toMatch(/\x1b\[1m/);
+    expect(stripAnsi(header)).toMatch(/^id\s+name\s+status/);
   });
   test('csv/tsv with quoting and fields', () => {
     const csv = formatOutput([{ a: 'x,y', b: 'q"uote', c: { n: 1 } }], { format: 'csv' });
