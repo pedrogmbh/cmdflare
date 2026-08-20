@@ -3,6 +3,7 @@ import { createClient } from '../core/client';
 import { loadConfig, maskSecret, resolveContext, saveConfig, configPath, type Context, type ConfigFile } from '../core/config';
 import { CliError, EXIT, UsageError, formatError } from '../core/errors';
 import { formatOutput } from '../core/output';
+import { detectTokenFormat, verifyApiToken, type TokenVerifyResult } from '../core/token';
 import { c, canPrompt, log, stdoutIsTTY, withSpinner } from '../core/ui';
 import { BUILTIN_HELP } from './index';
 
@@ -30,9 +31,18 @@ export async function runAuth(args: string[], gf: Record<string, any>, _argv: st
   }
 }
 
-async function verifyToken(client: any): Promise<{ id?: string; status?: string; expires_on?: string; not_before?: string }> {
-  const env = await client.get('/user/tokens/verify');
-  return env?.result ?? env;
+async function verifyToken(client: any, ctx: Context): Promise<TokenVerifyResult> {
+  return verifyApiToken(client, { token: ctx.credentials.apiToken, accountId: ctx.accountId });
+}
+
+function identityFromVerify(v: TokenVerifyResult): string {
+  const bits = [
+    v.kind === 'account' ? 'account-owned token' : 'token',
+    v.id,
+    v.account_name ? `(${v.account_name})` : v.account_id ? `(account ${v.account_id})` : '',
+    v.expires_on ? `(expires ${v.expires_on})` : '',
+  ].filter(Boolean);
+  return bits.join(' ');
 }
 
 async function login(gf: Record<string, any>, version: string): Promise<number> {
@@ -51,7 +61,7 @@ async function login(gf: Record<string, any>, version: string): Promise<number> 
     }
     const { password, select, input } = await import('@inquirer/prompts');
     log.info(`${c.bold('Cloudflare login')} ${c.dim(`(profile: ${profileName})`)}`);
-    log.info(c.dim('Create an API token at https://dash.cloudflare.com/profile/api-tokens (the "Edit zone DNS" or a custom template).'));
+    log.info(c.dim('User tokens: https://dash.cloudflare.com/profile/api-tokens  ·  Account tokens (cfat_): Manage Account → Account API Tokens'));
     const kind = await select(
       {
         message: 'Credential type',
@@ -72,18 +82,19 @@ async function login(gf: Record<string, any>, version: string): Promise<number> 
   }
   if (apiKey && !email) throw new UsageError('--api-key requires --email (or CLOUDFLARE_EMAIL).');
 
-  const ctx = resolveContext({ token, apiKey, email, profile: undefined }, cfg);
+  const ctx = resolveContext({ token, apiKey, email, profile: undefined, account: gf.account, zone: gf.zone }, cfg);
   // Force the provided creds regardless of env
   if (token) ctx.credentials = { kind: 'token', apiToken: token, source: 'login' };
   else ctx.credentials = { kind: 'key', apiKey, email, source: 'login' };
 
   const client = await createClient(ctx, { version });
   let identity = '';
+  let verified: TokenVerifyResult | undefined;
   await withSpinner('Verifying credentials…', async () => {
     if (token) {
-      const v = await verifyToken(client);
-      if (v?.status && v.status !== 'active') throw new CliError(`Token status is "${v.status}".`, { exitCode: EXIT.AUTH });
-      identity = `token ${v?.id ?? ''}${v?.expires_on ? ` (expires ${v.expires_on})` : ''}`.trim();
+      verified = await verifyToken(client, ctx);
+      if (verified.status && verified.status !== 'active') throw new CliError(`Token status is "${verified.status}".`, { exitCode: EXIT.AUTH });
+      identity = identityFromVerify(verified);
     } else {
       const u = await client.get('/user');
       identity = `user ${u?.result?.email ?? ''}`.trim();
@@ -103,6 +114,7 @@ async function login(gf: Record<string, any>, version: string): Promise<number> 
   cfg.profiles[profileName] = profile;
   if (!cfg.profile) cfg.profile = profileName;
   if (gf.account) profile.account_id = gf.account;
+  else if (verified?.account_id && !profile.account_id) profile.account_id = verified.account_id;
   if (gf.zone) profile.zone_id = gf.zone;
 
   // Offer a default account when there is exactly one (or let the user choose interactively).
@@ -156,11 +168,15 @@ async function status(gf: Record<string, any>, version: string): Promise<number>
     try {
       const client = await createClient(ctx, { version });
       if (ctx.credentials.kind === 'token') {
-        const v = await withSpinner('Verifying token…', () => verifyToken(client));
-        info.token_id = v?.id;
-        info.status = v?.status ?? 'unknown';
-        info.expires_on = v?.expires_on ?? null;
-        if (v?.status && v.status !== 'active') code = EXIT.AUTH;
+        const v = await withSpinner('Verifying token…', () => verifyToken(client, ctx));
+        info.token_kind = v.kind;
+        info.token_format = detectTokenFormat(ctx.credentials.apiToken);
+        info.token_id = v.id;
+        info.status = v.status ?? 'unknown';
+        info.expires_on = v.expires_on ?? null;
+        if (v.account_id && !info.account_id) info.account_id = v.account_id;
+        if (v.account_name) info.account_name = v.account_name;
+        if (v.status && v.status !== 'active') code = EXIT.AUTH;
       } else {
         const u = await withSpinner<any>('Verifying credentials…', () => client.get('/user'));
         info.status = 'active';
@@ -187,14 +203,20 @@ async function status(gf: Record<string, any>, version: string): Promise<number>
 }
 
 async function whoami(gf: Record<string, any>, version: string): Promise<number> {
-  const ctx = resolveContext({ profile: gf.profile, token: gf.token, apiKey: gf['api-key'], email: gf.email });
+  const ctx = resolveContext({ profile: gf.profile, token: gf.token, apiKey: gf['api-key'], email: gf.email, account: gf.account, zone: gf.zone, baseUrl: gf['base-url'] });
   const client = await createClient(ctx, { version });
   let data: any;
   try {
     data = (await withSpinner<any>('Fetching user…', () => client.get('/user')))?.result;
   } catch {
-    data = await verifyToken(client);
-    data = { token: data, note: 'Token cannot read /user (needs "User Details: Read"); showing token verification instead.' };
+    const v = await verifyToken(client, ctx);
+    data = {
+      ...v,
+      note:
+        v.kind === 'account'
+          ? 'Account-owned token (cfat_) is not tied to a user; showing token/account verification instead.'
+          : 'Token cannot read /user (needs "User Details: Read"); showing token verification instead.',
+    };
   }
   const json = gf.json || gf.output === 'json' || !stdoutIsTTY();
   process.stdout.write(formatOutput(data, { format: json ? 'json' : 'table' }) + '\n');

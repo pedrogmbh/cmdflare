@@ -49,7 +49,12 @@ cmdflare auth logout
 
 Credentials are looked up in this order: `--token` flag → `CLOUDFLARE_API_TOKEN` (also
 `CLOUDFLARE_TOKEN`, `CF_API_TOKEN`) → `CLOUDFLARE_API_KEY` + `CLOUDFLARE_EMAIL` → the active profile.
-Create tokens at <https://dash.cloudflare.com/profile/api-tokens>.
+
+Tokens: user API tokens (`cfut_…`, or unprefixed legacy) from
+<https://dash.cloudflare.com/profile/api-tokens>, and **account-owned** tokens (`cfat_…`) from
+**Manage Account → Account API Tokens**. Both are sent as `Authorization: Bearer`. `cmdflare auth`
+verifies `cfat_` tokens via the account (`/accounts/{id}/tokens/verify`), not `/user/tokens/verify`
+(which those tokens reject). Global API keys (`cfk_…`) still need `--api-key` + `--email`.
 
 Config lives in `~/.config/cmdflare/config.json` (`cmdflare config path`). Profiles hold a token plus
 default `account_id` / `zone_id`:

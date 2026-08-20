@@ -158,6 +158,20 @@ describe('against a fake API', () => {
         if (req.headers.get('authorization') === 'Bearer good-token') return ok({ id: 'tok1', status: 'active', expires_on: '2030-01-01T00:00:00Z' });
         return Response.json({ success: false, errors: [{ code: 1000, message: 'Invalid API Token' }], messages: [], result: null }, { status: 401 });
       }
+      const CFAT = 'cfat_' + 'x'.repeat(40) + 'abcd';
+      const ACC = 'a'.repeat(32);
+      if (url.pathname === `/client/v4/accounts/${ACC}/tokens/verify`) {
+        if (req.headers.get('authorization') === `Bearer ${CFAT}`) return ok({ id: 'acctok1', status: 'active' });
+        return Response.json({ success: false, errors: [{ code: 1000, message: 'Invalid API Token' }], messages: [], result: null }, { status: 401 });
+      }
+      if (url.pathname === `/client/v4/accounts/${ACC}` && req.method === 'GET') {
+        if (req.headers.get('authorization') === `Bearer ${CFAT}`) return ok({ id: ACC, name: 'UNFLD', type: 'standard' });
+      }
+      if (url.pathname === '/client/v4/accounts' && req.method === 'GET') {
+        if (req.headers.get('authorization') === `Bearer ${CFAT}`) {
+          return ok([{ id: ACC, name: 'UNFLD' }], { result_info: { page: 1, per_page: 50, total_pages: 1, total_count: 1, count: 1 } });
+        }
+      }
       if (url.pathname === '/client/v4/zones/missing') {
         return Response.json({ success: false, errors: [{ code: 7003, message: 'Could not route to /zones/missing' }], messages: [], result: null }, { status: 404 });
       }
@@ -212,7 +226,19 @@ describe('against a fake API', () => {
     expect(JSON.parse(a.stdout).status).toBe('invalid');
     const good = await runCli(['auth', 'status', '-o', 'json'], { env: { ...env(), CLOUDFLARE_API_TOKEN: 'good-token' } });
     expect(good.code).toBe(0);
-    expect(JSON.parse(good.stdout)).toMatchObject({ status: 'active', token_id: 'tok1' });
+    expect(JSON.parse(good.stdout)).toMatchObject({ status: 'active', token_id: 'tok1', token_kind: 'user' });
+  });
+  test('account-owned cfat_ token verifies via /accounts/.../tokens/verify, not /user/tokens/verify', async () => {
+    const CFAT = 'cfat_' + 'x'.repeat(40) + 'abcd';
+    const ACC = 'a'.repeat(32);
+    const st = await runCli(['auth', 'status', '-o', 'json'], {
+      env: { ...env(), CLOUDFLARE_API_TOKEN: undefined, CLOUDFLARE_TOKEN: CFAT, CLOUDFLARE_ACCOUNT_ID: ACC },
+    });
+    expect(st.code).toBe(0);
+    expect(JSON.parse(st.stdout)).toMatchObject({ status: 'active', token_kind: 'account', token_format: 'account', token_id: 'acctok1', account_id: ACC });
+    const login = await runCli(['auth', 'login', '--token', CFAT, '-p', 'acct'], { env: env() });
+    expect(login.code).toBe(0);
+    expect(login.stderr).toContain('account-owned token');
   });
   test('auth login non-interactive stores the token in the profile', async () => {
     const r = await runCli(['auth', 'login', '--token', 'good-token', '-p', 'ci'], { env: env() });

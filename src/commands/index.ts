@@ -80,7 +80,8 @@ export const BUILTIN_HELP: Record<string, string> = {
   cmdflare auth whoami          Show the user/token identity
   cmdflare auth logout [-p <profile>]   Remove stored credentials from the profile
 
-Tokens: https://dash.cloudflare.com/profile/api-tokens`,
+Tokens: user tokens at https://dash.cloudflare.com/profile/api-tokens (cfut_);
+  account-owned tokens (cfat_) at Manage Account → Account API Tokens.`,
   config: `${c.bold('cmdflare config')} — profiles & defaults (${c.dim('stored in the config file, see `cmdflare config path`')})
 
   cmdflare config list                     Show all profiles and settings
