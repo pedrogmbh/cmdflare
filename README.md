@@ -72,6 +72,31 @@ cmdflare help --tree zero-trust
 
 Path ids are positional (`cmdflare dns records get <dns-record-id>`). Everything else is a `--flag` named after the API field. Zones and accounts accept **names**: `--zone example.com`, `-A "Acme Corp"` (or `CLOUDFLARE_ZONE_ID` / `CLOUDFLARE_ACCOUNT_ID`, or a profile default).
 
+## Bulk export
+
+A few commands are whole workflows rather than one API call.
+
+```bash
+cmdflare stream export ./backup              # every Stream video + a CSV manifest
+cmdflare stream export ./backup --compress   # …and ./backup.tar.gz
+cmdflare stream export ./backup --dry-run    # what it would download, without touching anything
+cmdflare stream export ./backup --retry-failed   # re-attempt only what failed last time
+```
+
+`stream export` walks the whole library, saves each video as `<id>.mp4` and each caption track as
+`<id>.<language>.vtt`, and writes `videos.csv` with every video's id, title, description, public
+URLs, flags, dates, captions, the full custom `meta` object and the relative path to each file.
+Existing files are skipped, so an interrupted export resumes. Every MP4 render is requested up front
+(`--request-concurrency`, default 16) so Cloudflare renders the library in parallel, then files are
+downloaded as they become ready (`--concurrency`, default 4) — a big library takes about as long as
+one render, not one per batch. The generated MP4s are kept on your account (they count towards Stream
+storage; remove them with `cmdflare stream downloads delete <id>`). Use `--metadata-only` for the CSV
+alone, `--limit` / `--creator` / `--search` / `--start` / `--end` to export a subset.
+
+If a run ends with failures (exit 1, an `error` column in the CSV), `--retry-failed` reads the
+manifest and re-attempts *only* those videos — no re-listing, no other rows touched — then updates
+their rows in place.
+
 ## Scripts and CI
 
 JSON when piped, tables on a TTY. Destructive commands ask on a TTY and need `--yes` otherwise. `--no-input` (or `CI=true`) never prompts.

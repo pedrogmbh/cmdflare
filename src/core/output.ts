@@ -321,20 +321,83 @@ function renderRows(rows: Record<string, any>[], columns?: string[]): string {
 // CSV / TSV
 // ---------------------------------------------------------------------------
 
+/** Escapes one cell for CSV/TSV output. Shared so files written to disk quote exactly like `-o csv`. */
+export function delimitedCell(v: any, delim: string): string {
+  let s: string;
+  if (v === null || v === undefined) s = '';
+  else if (typeof v === 'object') s = JSON.stringify(v);
+  else s = String(v);
+  if (delim === ',' && /[",\n\r]/.test(s)) s = '"' + s.replace(/"/g, '""') + '"';
+  if (delim === '\t') s = s.replace(/\t/g, ' ').replace(/\n/g, ' ');
+  return s;
+}
+
+/** Joins one row of already-extracted values. */
+export function delimitedRow(values: any[], delim = ','): string {
+  return values.map((v) => delimitedCell(v, delim)).join(delim);
+}
+
+export interface ParsedDelimited {
+  header: string[];
+  rows: string[][];
+}
+
+/**
+ * Parses CSV/TSV written by `formatDelimited` (RFC 4180 quoting: doubled quotes, and delimiters or
+ * newlines inside quoted cells). Blank trailing lines are ignored.
+ */
+export function parseDelimited(text: string, delim = ','): ParsedDelimited {
+  const rows: string[][] = [];
+  let row: string[] = [];
+  let cell = '';
+  let quoted = false;
+  let started = false; // distinguishes an empty final line from a row of one empty cell
+  const endCell = () => {
+    row.push(cell);
+    cell = '';
+  };
+  const endRow = () => {
+    endCell();
+    rows.push(row);
+    row = [];
+    started = false;
+  };
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i]!;
+    if (quoted) {
+      if (ch === '"') {
+        if (text[i + 1] === '"') {
+          cell += '"';
+          i++;
+        } else quoted = false;
+      } else cell += ch;
+      continue;
+    }
+    if (ch === '"' && cell === '') {
+      quoted = true;
+      started = true;
+    } else if (ch === delim) {
+      endCell();
+      started = true;
+    } else if (ch === '\n') {
+      if (started || cell !== '') endRow();
+    } else if (ch === '\r') {
+      // ignore: handled by the \n that follows
+    } else {
+      cell += ch;
+      started = true;
+    }
+  }
+  if (started || cell !== '') endRow();
+  const header = rows.shift() ?? [];
+  return { header, rows };
+}
+
 function formatDelimited(data: any, delim: string, columns?: string[]): string {
   const rows: Record<string, any>[] = Array.isArray(data) ? data.map((x) => (isPlainObject(x) ? x : { value: x })) : isPlainObject(data) ? [data] : [{ value: data }];
   if (rows.length === 0) return '';
   const cols = columns && columns.length ? columns : [...new Set(rows.flatMap((r) => Object.keys(r as object)))];
-  const esc = (v: any) => {
-    let s: string;
-    if (v === null || v === undefined) s = '';
-    else if (typeof v === 'object') s = JSON.stringify(v);
-    else s = String(v);
-    if (delim === ',' && /[",\n\r]/.test(s)) s = '"' + s.replace(/"/g, '""') + '"';
-    if (delim === '\t') s = s.replace(/\t/g, ' ').replace(/\n/g, ' ');
-    return s;
-  };
-  return [cols.join(delim), ...rows.map((r) => cols.map((col) => esc(colValue(r, col))).join(delim))].join('\n');
+  return [cols.join(delim), ...rows.map((r) => delimitedRow(cols.map((col) => colValue(r, col)), delim))].join('\n');
 }
 
 function colValue(row: any, col: string): any {

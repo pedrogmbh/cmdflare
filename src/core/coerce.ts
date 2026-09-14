@@ -3,6 +3,7 @@ import { createReadStream, readFileSync } from 'node:fs';
 import { basename } from 'node:path';
 import YAML from 'yaml';
 import { parseBool } from './argv';
+import { expandHome } from './paths';
 import { UsageError } from './errors';
 import type { TypeSpec } from './manifest-types';
 
@@ -32,7 +33,7 @@ export function looksLikeJson(s: string): boolean {
 export function resolveAt(raw: string, flag: string): string {
   if (raw === '@-') return stdinText();
   if (raw.startsWith('@') && raw.length > 1 && !raw.startsWith('@@')) {
-    const file = raw.slice(1);
+    const file = expandHome(raw.slice(1));
     try {
       return readFileSync(file, 'utf8');
     } catch (err: any) {
@@ -68,7 +69,7 @@ function fileValue(raw: string, flag: string): any {
   if (raw === '@-') {
     return new File([stdinText()], 'stdin');
   }
-  const path = raw.startsWith('@') ? raw.slice(1) : raw;
+  const path = expandHome(raw.startsWith('@') ? raw.slice(1) : raw);
   try {
     if (typeof Bun !== 'undefined') {
       const f = Bun.file(path);

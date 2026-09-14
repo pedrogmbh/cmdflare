@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, test } from 'bun:test';
-import { applyQuery, formatOutput, selectFields } from '../src/core/output';
+import { applyQuery, formatOutput, parseDelimited, selectFields } from '../src/core/output';
 import { setColor, stripAnsi } from '../src/core/ui';
 
 const rows = [
@@ -61,5 +61,27 @@ describe('formatOutput', () => {
   });
   test('selectFields', () => {
     expect(selectFields(rows, ['id', 'meta.x'])).toEqual([{ id: 'a1', 'meta.x': 1 }, { id: 'b2', 'meta.x': 2 }]);
+  });
+});
+
+describe('parseDelimited', () => {
+  test('round-trips what formatDelimited writes', () => {
+    const data = [
+      { id: 'a', note: 'plain' },
+      { id: 'b', note: 'has, comma' },
+      { id: 'c', note: 'has "quotes" and, comma' },
+      { id: 'd', note: 'line\nbreak' },
+      { id: 'e', note: '' },
+    ];
+    const csv = formatOutput(data, { format: 'csv' });
+    const parsed = parseDelimited(csv);
+    expect(parsed.header).toEqual(['id', 'note']);
+    expect(parsed.rows).toEqual(data.map((d) => [d.id, d.note]));
+  });
+  test('handles trailing newline, CRLF and empty input', () => {
+    expect(parseDelimited('a,b\n1,2\n').rows).toEqual([['1', '2']]);
+    expect(parseDelimited('a,b\r\n1,2\r\n').rows).toEqual([['1', '2']]);
+    expect(parseDelimited('').header).toEqual([]);
+    expect(parseDelimited('a,b\n').rows).toEqual([]);
   });
 });

@@ -2,6 +2,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { attachComposites } from './composites';
 import { CliError } from './errors';
 import type { Manifest, MethodNode, ResourceNode } from './manifest-types';
 import { normKey } from './names';
@@ -27,6 +28,7 @@ let indexCache: Manifest | undefined;
 export function loadIndex(): Manifest {
   if (indexCache) return indexCache;
   indexCache = JSON.parse(readFileSync(join(generatedDir(), 'index.json'), 'utf8')) as Manifest;
+  attachComposites(indexCache.root);
   return indexCache;
 }
 

@@ -2,9 +2,11 @@
 import { ArgvError, parseArgv, type FlagSpec } from './core/argv';
 import { GLOBAL_SPECS } from './core/globals';
 import { createClient, type CapturedRequest } from './core/client';
-import { VERSION, applyGlobalUi, contextFromFlags, decideFormat, printDryRun, type GlobalFlags } from './core/runtime';
+import { VERSION, applyGlobalUi, contextFromFlags, decideFormat, printDryRun, type GlobalFlags, type Invocation } from './core/runtime';
+import { loadComposite } from './core/composites';
 import { argvWantsStdin, prefetchStdin } from './core/coerce';
 import { ID_RE } from './core/config';
+import { resolvePath } from './core/paths';
 import { CliError, EXIT, formatError, UsageError } from './core/errors';
 import { methodHelpData, renderMethodHelp, renderResourceHelp, renderRootHelp, resourceHelpData, rootHelpData, writeHelp } from './core/help';
 import { invokeMethod } from './core/invoke';
@@ -79,12 +81,21 @@ async function run(argv: string[]): Promise<number> {
     writeHelp(g.flags, renderMethodHelp(res.path, method), methodHelpData(res.path, method));
     return EXIT.OK;
   }
+  if (method.composite) return runComposite(res, method, argv);
   return runMethod(res, method, argv, g.flags);
 }
 
-export async function runMethod(res: Resolved, method: MethodNode, argv: string[], gf1: GlobalFlags): Promise<number> {
+export async function runComposite(res: Resolved, method: MethodNode, argv: string[]): Promise<number> {
+  const [inv, mod] = await Promise.all([prepareInvocation(res, method, argv), loadComposite(method.composite!)]);
+  return mod.run({ ...inv, path: res.path, method });
+}
+
+/**
+ * Parses argv against a method's flags, resolves account/zone context and builds the params object,
+ * prompting for anything required that is missing (on a TTY). Shared by generated and composite commands.
+ */
+export async function prepareInvocation(res: Resolved, method: MethodNode, argv: string[]): Promise<Invocation> {
   const path = res.path;
-  const node = res.node;
   const cp = commandPath(path, method);
   const globalNames = new Set(GLOBAL_SPECS.map((s) => s.name));
   const { specs: paramSpecs, props, collisions } = buildMethodFlagSpecs(method, globalNames);
@@ -177,6 +188,13 @@ export async function runMethod(res: Resolved, method: MethodNode, argv: string[
     }
   }
 
+  return { gf, positionals, params, ctx, getClient, getRealClient, dryRun, captured, cp };
+}
+
+export async function runMethod(res: Resolved, method: MethodNode, argv: string[], gf1: GlobalFlags): Promise<number> {
+  const node = res.node;
+  const { gf, positionals, params, getClient, dryRun, captured, cp } = await prepareInvocation(res, method, argv);
+
   // Destructive confirmation
   if (method.destructive && !gf.yes && !dryRun) {
     if (canPrompt()) {
@@ -197,7 +215,7 @@ export async function runMethod(res: Resolved, method: MethodNode, argv: string[
   const limit: number | undefined = gf.limit ?? (typeof params.limit === 'number' ? params.limit : undefined);
   const streaming = format === 'ndjson' && !gf.query && !fields && !!method.paginated && !!gf.all && !gf['include-meta'];
 
-  const outFile: string | undefined = gf['output-file'];
+  const outFile: string | undefined = gf['output-file'] ? resolvePath(String(gf['output-file'])) : undefined;
   const write = (text: string) => {
     if (outFile) require('node:fs').writeFileSync(outFile, text);
     else process.stdout.write(text);

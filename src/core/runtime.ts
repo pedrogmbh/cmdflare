@@ -9,6 +9,22 @@ export const VERSION: string = (pkg as any).version ?? '0.0.0';
 
 export type GlobalFlags = Record<string, any>;
 
+/** Everything a command needs before it runs: parsed flags, positionals, params, context and a client. */
+export interface Invocation {
+  gf: GlobalFlags;
+  positionals: any[];
+  params: Record<string, any>;
+  ctx: Context;
+  /** Client honouring --dry-run (requests are captured, not sent). */
+  getClient: () => Promise<any>;
+  /** Client that always talks to the API, even under --dry-run (used for name resolution). */
+  getRealClient: () => Promise<any>;
+  dryRun: boolean;
+  captured: CapturedRequest[];
+  /** Command path, e.g. "dns records create". */
+  cp: string;
+}
+
 export function applyGlobalUi(gf: GlobalFlags) {
   if (gf.color !== undefined) setColor(gf.color);
   if (gf.verbose) setVerbose(true);

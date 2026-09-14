@@ -1,8 +1,9 @@
 import { describe, expect, test } from 'bun:test';
 import { writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { homedir, tmpdir } from 'node:os';
+import { join, relative } from 'node:path';
 import { coerceValue, getPath, setPath } from '../src/core/coerce';
+import { expandHome } from '../src/core/paths';
 import type { TypeSpec } from '../src/core/manifest-types';
 
 const enumSpec: TypeSpec = { kind: 'enum', enum: ['A', 'AAAA', 'CNAME'] };
@@ -56,5 +57,30 @@ describe('setPath/getPath', () => {
     expect(o).toEqual({ a: { b: { c: 1 } }, list: [{ name: 'x' }, { name: 'y' }] });
     expect(getPath(o, 'list[1].name')).toBe('y');
     expect(getPath(o, 'a.missing.x')).toBeUndefined();
+  });
+});
+
+describe('expandHome', () => {
+  const home = homedir();
+  test('expands a leading ~ the shell did not', () => {
+    expect(expandHome('~')).toBe(home);
+    expect(expandHome('~/backup')).toBe(join(home, 'backup'));
+    expect(expandHome('~/a/b.csv')).toBe(join(home, 'a/b.csv'));
+  });
+  test('leaves everything else alone', () => {
+    expect(expandHome('/abs/path')).toBe('/abs/path');
+    expect(expandHome('rel/path')).toBe('rel/path');
+    expect(expandHome('~user/x')).toBe('~user/x'); // another user's home is not portable to resolve
+    expect(expandHome('./~/x')).toBe('./~/x');
+    expect(expandHome('')).toBe('');
+  });
+  test('@file references expand it too', () => {
+    const f = join(tmpdir(), `cmdflare-tilde-${process.pid}.json`);
+    writeFileSync(f, '{"ok":true}');
+    // a path under the real home, referenced with ~
+    const rel = relative(home, f);
+    if (!rel.startsWith('..')) {
+      expect(coerceValue('@' + join('~', rel), { kind: 'object', props: [] }, 'o')).toEqual({ ok: true });
+    }
   });
 });

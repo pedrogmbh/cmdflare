@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { renderMethodHelp, renderResourceHelp } from '../src/core/help';
 import { commandPath, countMethods, flattenCommands, getMethodDetail, loadIndex, loadTopDetail, resolveCommand, searchScore, suggest } from '../src/core/manifest';
+import type { ResourceNode } from '../src/core/manifest-types';
 import { kebab, normKey } from '../src/core/names';
 import { buildMethodFlagSpecs, buildParams, normalizeParamPath } from '../src/core/params';
 import { GLOBAL_NAMES } from '../src/core/globals';
@@ -39,11 +40,25 @@ describe('manifest', () => {
     expect(!bad.ok && bad.suggestions).toContain('records');
   });
   test('detail files agree with the index', () => {
+    // Composite commands are spliced into the index only (they carry their params inline),
+    // so the detail files hold exactly the generated methods.
+    const composites = (node: ResourceNode): number =>
+      node.methods.filter((m) => m.composite).length + node.children.reduce((a, c) => a + composites(c), 0);
     for (const top of idx.root.children) {
       const det = loadTopDetail(top.cli);
       expect(det.name).toBe(top.name);
-      expect(countMethods(det)).toBe(countMethods(top));
+      expect(countMethods(det)).toBe(countMethods(top) - composites(top));
     }
+  });
+
+  test('composite commands are attached and resolvable', () => {
+    const r = resolveCommand(['stream', 'export']);
+    expect(r.ok && r.method?.composite).toBe('stream-export');
+    expect(r.ok && r.method?.params?.type.props?.some((p) => p.name === 'account_id')).toBe(true);
+    // and they never shadow a generated method
+    const stream = idx.root.children.find((c) => c.cli === 'stream')!;
+    expect(stream.methods.filter((m) => m.cli === 'export')).toHaveLength(1);
+    expect(stream.methods.filter((m) => !m.composite).map((m) => m.cli)).toEqual(expect.arrayContaining(['list', 'get', 'create', 'delete', 'edit']));
   });
   test('method detail carries params', () => {
     const r = resolveCommand(['dns', 'records', 'create']);

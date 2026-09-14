@@ -1,4 +1,4 @@
-/** List/search helpers for interactive pickers (zones, accounts, DNS records). */
+/** List/search helpers for interactive pickers (zones, accounts, DNS records) and bulk workflows (Stream). */
 import { sdkModules } from '../generated/modules';
 import { collectPaginatedItems, type CollectPagesResult } from './invoke';
 
@@ -27,6 +27,18 @@ export interface AccountQuery extends CatalogQuery {
 export interface DnsRecordQuery extends CatalogQuery {
   zoneId: string;
   search?: string;
+}
+
+/** Stream's list endpoint caps `limit` at 1000 and has no page cursor — see listStreamVideos. */
+export const STREAM_PAGE_SIZE = 1000;
+
+export interface StreamVideoQuery extends CatalogQuery {
+  accountId: string;
+  /** Pass-through list filters (creator, search, status, type, start, end, …). */
+  filters?: Record<string, unknown>;
+  pageSize?: number;
+  /** Called when a page is skipped because every video in it was already seen. */
+  onStall?: (cursor: string) => void;
 }
 
 export function zoneNameQuery(term: string): string {
@@ -86,4 +98,51 @@ export async function listDnsRecords(client: any, opts: DnsRecordQuery): Promise
   if (opts.search) query.search = opts.search;
   const page = await new mod.Records(client).list(query, reqOpts(opts.signal));
   return collectPaginatedItems(page, { maxItems: opts.maxItems });
+}
+
+/**
+ * Yields every Stream video of an account, one batch per request.
+ *
+ * Stream's list endpoint is modelled as `SinglePage` in the SDK (`nextPageRequestOptions()` is always
+ * null), so `--all`/`collectPaginatedItems` cannot page it. Instead we sort ascending and use the
+ * `created` timestamp of the last video as the `start` of the next request. `start` is inclusive, so
+ * the boundary video repeats and is filtered out by uid.
+ */
+export async function* listStreamVideos(client: any, opts: StreamVideoQuery): AsyncGenerator<any[]> {
+  const mod = await sdkModules['resources/stream/stream']!();
+  const stream = new mod.Stream(client);
+  const pageSize = opts.pageSize && opts.pageSize > 0 ? Math.min(opts.pageSize, STREAM_PAGE_SIZE) : STREAM_PAGE_SIZE;
+  const maxItems = opts.maxItems != null && opts.maxItems > 0 ? opts.maxItems : Number.POSITIVE_INFINITY;
+  const seen = new Set<string>();
+  let cursor: string | undefined = typeof opts.filters?.start === 'string' ? (opts.filters.start as string) : undefined;
+
+  while (seen.size < maxItems) {
+    const query: Record<string, unknown> = { account_id: opts.accountId, asc: true, limit: pageSize, ...opts.filters };
+    if (cursor) query.start = cursor;
+    const page: any = await stream.list(query, reqOpts(opts.signal));
+    const batch: any[] = typeof page?.getPaginatedItems === 'function' ? page.getPaginatedItems() : (page?.result ?? []);
+    if (batch.length === 0) return;
+
+    const fresh: any[] = [];
+    for (const video of batch) {
+      const uid = String(video?.uid ?? '');
+      if (!uid || seen.has(uid)) continue;
+      seen.add(uid);
+      fresh.push(video);
+      if (seen.size >= maxItems) break;
+    }
+    if (fresh.length) yield fresh;
+
+    if (batch.length < pageSize) return; // short page: that was the last one
+    const last = batch[batch.length - 1];
+    const next = last?.created ?? last?.uploaded;
+    if (!next || typeof next !== 'string') return;
+    if (fresh.length === 0) {
+      // Every video in this page was already seen: more than `pageSize` videos share one timestamp,
+      // and advancing the cursor would loop forever. Stop rather than spin.
+      opts.onStall?.(next);
+      return;
+    }
+    cursor = next;
+  }
 }

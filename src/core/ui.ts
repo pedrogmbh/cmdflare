@@ -108,6 +108,53 @@ export async function withSpinner<T>(text: string, fn: () => Promise<T>): Promis
   }
 }
 
+export interface Progress {
+  /** Advance the counter and redraw. `note` describes what is happening right now. */
+  tick(note?: string): void;
+  /** Redraw without advancing (e.g. to show download percentage). */
+  update(note?: string): void;
+  /** Erase the progress line; safe to call more than once. */
+  done(): void;
+}
+
+/**
+ * N-of-M progress on stderr: a rewriting line on a TTY, occasional plain lines otherwise
+ * (so CI logs stay readable), nothing at all under --quiet.
+ */
+export function createProgress(total: number, label = ''): Progress {
+  let current = 0;
+  let lastPlain = 0;
+  const tty = stderrIsTTY() && !quiet;
+  const render = (note?: string) => {
+    if (quiet) return;
+    const head = `[${current}/${total}]${label ? ' ' + label : ''}`;
+    if (tty) {
+      const line = `${head}${note ? ' ' + note : ''}`;
+      const width = termWidth() - 1;
+      process.stderr.write(`\r${ESC}[2K${c.dim(line.length > width ? line.slice(0, width - 1) + '…' : line)}`);
+      return;
+    }
+    // Non-TTY: one line per 10% or every 25 items, whichever comes first.
+    const step = Math.max(1, Math.min(25, Math.ceil(total / 10)));
+    if (current === total || current - lastPlain >= step) {
+      lastPlain = current;
+      process.stderr.write(`${head}${note ? ' ' + note : ''}\n`);
+    }
+  };
+  return {
+    tick(note) {
+      current++;
+      render(note);
+    },
+    update(note) {
+      render(note);
+    },
+    done() {
+      if (tty && !quiet) process.stderr.write(`\r${ESC}[2K`);
+    },
+  };
+}
+
 export function plural(n: number, word: string, pluralWord?: string): string {
   return `${n} ${n === 1 ? word : (pluralWord ?? word + 's')}`;
 }

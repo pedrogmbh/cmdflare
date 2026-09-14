@@ -10,6 +10,7 @@ import { commandPath, countMethods, flattenCommands, getMethodDetail, loadIndex,
 import type { MethodNode, ResourceNode } from '../core/manifest-types';
 import { flagName } from '../core/names';
 import { formatOutput } from '../core/output';
+import { resolvePath } from '../core/paths';
 import { commandLineFor } from '../core/params';
 import { resolveAccountId, resolveZoneId } from '../core/resolve';
 import { c, log, withSpinner } from '../core/ui';
@@ -218,6 +219,27 @@ async function runPicked(pick: Pick & { kind: 'method' }, ctx: Context, getClien
   if (!go) return;
 
   if (ctx.credentials.kind === 'none') throw new CliError('No credentials: run `cmdflare auth login` first.', { exitCode: EXIT.AUTH });
+
+  // Composite commands (e.g. `stream export`) are whole workflows: hand over and let them report.
+  if (method.composite) {
+    const { loadComposite } = await import('../core/composites');
+    const mod = await loadComposite(method.composite);
+    await mod.run({
+      gf: { ...opts.globals, yes: true }, // the user just confirmed above
+      positionals,
+      params,
+      ctx,
+      getClient,
+      getRealClient: getClient,
+      dryRun: false,
+      captured: [],
+      cp,
+      path: pick.path,
+      method,
+    });
+    return;
+  }
+
   const client = await getClient();
   let result = await withSpinner(`${method.http ?? ''} ${cp}…`, () => invokeMethod(client, pick.node, method, { positionals, params }));
   if (result.binary) {
@@ -254,7 +276,7 @@ async function runPicked(pick: Pick & { kind: 'method' }, ctx: Context, getClien
     if (next === 'save') {
       const { input } = await import('@inquirer/prompts');
       const file = await input({ message: 'File path', default: `${method.name}.json` }, promptIO());
-      writeFileSync(file, JSON.stringify(data, null, 2) + '\n');
+      writeFileSync(resolvePath(file), JSON.stringify(data, null, 2) + '\n');
       log.success(`Saved to ${file}`);
     }
   }

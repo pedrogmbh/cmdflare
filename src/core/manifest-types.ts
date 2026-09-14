@@ -55,6 +55,8 @@ export interface MethodNode {
   destructive?: boolean;
   multipart?: boolean;
   binary?: boolean;
+  /** Hand-written composite command: key into the runner map in `src/cli.ts` (see `src/core/composites.ts`). */
+  composite?: string;
   /** Index-only: the method takes a params object (details live in the resource file). */
   hasParams?: boolean;
   paramsRequired?: boolean;

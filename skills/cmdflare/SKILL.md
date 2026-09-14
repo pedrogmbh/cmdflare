@@ -40,4 +40,11 @@ cmdflare dns records list --zone example.com --json --no-input
 cmdflare dns records list --zone example.com --all -q '[*].name' --json --no-input
 cmdflare cache purge --zone example.com --purge-everything --yes --no-input
 cmdflare api GET /zones --paginate -q '[*].name' --json --no-input
+cmdflare stream export ./backup --json --no-input   # whole Stream library + videos.csv
 ```
+
+## Bulk workflows
+
+A few commands do multi-step work instead of one request; they still take `--json --no-input` and print a summary object.
+
+- `cmdflare stream export <dir>` — download every Stream video (`<id>.mp4`), its captions (`<id>.<lang>.vtt`) and a `videos.csv` manifest. `--compress` adds `<dir>.tar.gz`, `--metadata-only` skips media, `--dry-run` reports the plan, `--retry-failed` re-runs only the rows the manifest marked `failed`. It creates MP4 downloads on the account (billable storage) and keeps them; `--yes` skips the confirmation prompt on a TTY (non-interactive runs never prompt).

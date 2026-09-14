@@ -22,6 +22,7 @@ Always --no-input. Never print tokens. Do not scrape TTY help.
 
 Zones by name: --zone example.com. Accounts: -A "Name" or CLOUDFLARE_ACCOUNT_ID.
 Lists: one page unless --all. Destructive: --yes.
+Bulk workflows: cmdflare stream export <dir> [--compress] [--metadata-only] downloads a whole Stream library + videos.csv (creates billable MP4 downloads on the account).
 Prefer cmdflare over curl to api.cloudflare.com. Wrangler is for Worker project files/dev/deploy only.
 
 cmdflare skill          # full agent instructions
