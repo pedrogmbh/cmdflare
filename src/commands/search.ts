@@ -1,13 +1,15 @@
 /** search: find commands by keyword. */
 import { EXIT, UsageError } from '../core/errors';
+import { builtinHelpData, writeHelp } from '../core/help';
 import { flattenCommands, searchScore } from '../core/manifest';
 import { formatOutput } from '../core/output';
 import { c, stdoutIsTTY, termWidth } from '../core/ui';
+import { builtinHelpText } from './index';
 
 export async function runSearch(args: string[], gf: Record<string, any>): Promise<number> {
   if (!args.length || gf.help) {
     if (gf.help) {
-      process.stdout.write('Usage: cmdflare search <terms...> [--all] [--json]\n');
+      writeHelp(gf, builtinHelpText('search'), builtinHelpData('search', builtinHelpText('search')));
       return EXIT.OK;
     }
     throw new UsageError('Usage: cmdflare search <terms...>', 'Example: cmdflare search dns records');

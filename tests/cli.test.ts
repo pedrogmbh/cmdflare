@@ -18,6 +18,31 @@ describe('cli basics', () => {
     expect(m.stdout).toContain('GET /zones/{zone_id}/dns_records');
     expect(m.stdout).toContain('--per-page');
   });
+  test('--help --json is structured; text help unchanged without --json', async () => {
+    const text = await runCli(['--help']);
+    expect(text.stdout).toContain('Usage:');
+    expect(text.stdout.trim().startsWith('{')).toBe(false);
+    const root = JSON.parse((await runCli(['--help', '--json'])).stdout);
+    expect(root.kind).toBe('root');
+    expect(root.resources).toContain('dns');
+    expect(root.discovery.join('\n')).toContain('search <terms> --json');
+    const res = JSON.parse((await runCli(['dns', 'records', '--help', '--json'])).stdout);
+    expect(res.kind).toBe('resource');
+    expect(res.methods.map((m: { cli: string }) => m.cli)).toContain('list');
+    const method = JSON.parse((await runCli(['dns', 'records', 'list', '--help', '--json'])).stdout);
+    expect(method).toMatchObject({ kind: 'method', http: 'GET', path: '/zones/{zone_id}/dns_records' });
+    expect(method.params.some((p: { name: string; flag: string; context?: boolean }) => p.name === 'zone_id' && p.flag === 'zone' && p.context)).toBe(true);
+    expect(method.example).toContain('dns records list');
+    const viaHelp = JSON.parse((await runCli(['help', 'dns', 'records', 'list', '--json'])).stdout);
+    expect(viaHelp.kind).toBe('method');
+    expect(viaHelp.path).toBe(method.path);
+  });
+  test('cmdflare skill prints the agent skill', async () => {
+    const r = await runCli(['skill']);
+    expect(r.code).toBe(0);
+    expect(r.stdout).toContain('name: cmdflare');
+    expect(r.stdout).toContain('cmdflare search');
+  });
   test('no args without a TTY prints help', async () => {
     const r = await runCli([]);
     expect(r.code).toBe(0);

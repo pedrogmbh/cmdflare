@@ -6,7 +6,7 @@ import { VERSION, applyGlobalUi, contextFromFlags, decideFormat, printDryRun, ty
 import { argvWantsStdin, prefetchStdin } from './core/coerce';
 import { ID_RE } from './core/config';
 import { CliError, EXIT, formatError, UsageError } from './core/errors';
-import { renderMethodHelp, renderResourceHelp, renderRootHelp } from './core/help';
+import { methodHelpData, renderMethodHelp, renderResourceHelp, renderRootHelp, resourceHelpData, rootHelpData, writeHelp } from './core/help';
 import { invokeMethod } from './core/invoke';
 import { commandPath, getMethodDetail, resolveCommand, type Resolved } from './core/manifest';
 import type { MethodNode, ResourceNode } from './core/manifest-types';
@@ -43,14 +43,14 @@ async function run(argv: string[]): Promise<number> {
 
   if (!first) {
     if (g.flags.help) {
-      process.stdout.write(renderRootHelp(VERSION) + '\n');
+      writeHelp(g.flags, renderRootHelp(VERSION), rootHelpData(VERSION));
       return EXIT.OK;
     }
     if (g.flags.interactive || canPrompt()) {
       const { runInteractive } = await import('./interactive');
       return runInteractive({ globals: g.flags, version: VERSION });
     }
-    process.stdout.write(renderRootHelp(VERSION) + '\n');
+    writeHelp(g.flags, renderRootHelp(VERSION), rootHelpData(VERSION));
     return EXIT.OK;
   }
 
@@ -64,7 +64,7 @@ async function run(argv: string[]): Promise<number> {
   }
   if (!res.method) {
     if (g.flags.help) {
-      process.stdout.write(renderResourceHelp(res.path, res.node) + '\n');
+      writeHelp(g.flags, renderResourceHelp(res.path, res.node), resourceHelpData(res.path, res.node));
       return EXIT.OK;
     }
     if (g.flags.interactive || canPrompt()) {
@@ -76,7 +76,7 @@ async function run(argv: string[]): Promise<number> {
   }
   const method = getMethodDetail(res.path, res.method);
   if (g.flags.help) {
-    process.stdout.write(renderMethodHelp(res.path, method) + '\n');
+    writeHelp(g.flags, renderMethodHelp(res.path, method), methodHelpData(res.path, method));
     return EXIT.OK;
   }
   return runMethod(res, method, argv, g.flags);

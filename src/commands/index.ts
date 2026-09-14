@@ -1,10 +1,10 @@
 /** Builtin (non-API) commands dispatcher. */
 import { EXIT, UsageError } from '../core/errors';
-import { renderMethodHelp, renderResourceHelp, renderRootHelp, renderTree } from '../core/help';
+import { builtinHelpData, methodHelpData, renderMethodHelp, renderResourceHelp, renderRootHelp, renderTree, resourceHelpData, rootHelpData, writeHelp } from '../core/help';
 import { commandPath, getMethodDetail, loadIndex, resolveCommand } from '../core/manifest';
 import { c } from '../core/ui';
 
-export const BUILTIN_NAMES = new Set(['auth', 'config', 'api', 'search', 'interactive', 'i', 'completion', 'help', 'version', '__complete']);
+export const BUILTIN_NAMES = new Set(['auth', 'config', 'api', 'search', 'interactive', 'i', 'completion', 'help', 'version', 'skill', '__complete']);
 
 export async function runBuiltin(name: string, args: string[], gf: Record<string, any>, argv: string[], version: string): Promise<number> {
   switch (name) {
@@ -28,6 +28,10 @@ export async function runBuiltin(name: string, args: string[], gf: Record<string
     case 'search': {
       const { runSearch } = await import('./search');
       return runSearch(args, gf);
+    }
+    case 'skill': {
+      const { runSkill } = await import('./skill');
+      return runSkill(gf);
     }
     case 'completion': {
       const { runCompletion } = await import('./completion');
@@ -58,16 +62,18 @@ function runHelp(args: string[], gf: Record<string, any>, version: string, argv:
     return EXIT.OK;
   }
   if (!args.length) {
-    process.stdout.write(renderRootHelp(version) + '\n');
+    writeHelp(gf, renderRootHelp(version), rootHelpData(version));
     return EXIT.OK;
   }
   if (BUILTIN_NAMES.has(args[0]!)) {
-    return runBuiltinHelp(args[0]!);
+    return runBuiltinHelp(args[0]!, gf);
   }
   const res = resolveCommand(args);
   if (!res.ok) throw new UsageError(`Unknown command "${res.token}".`, res.suggestions.length ? `Did you mean: ${res.suggestions.join(', ')}?` : undefined);
-  if (res.method) process.stdout.write(renderMethodHelp(res.path, getMethodDetail(res.path, res.method)) + '\n');
-  else process.stdout.write(renderResourceHelp(res.path, res.node) + '\n');
+  if (res.method) {
+    const method = getMethodDetail(res.path, res.method);
+    writeHelp(gf, renderMethodHelp(res.path, method), methodHelpData(res.path, method));
+  } else writeHelp(gf, renderResourceHelp(res.path, res.node), resourceHelpData(res.path, res.node));
   return EXIT.OK;
 }
 
@@ -115,11 +121,19 @@ Examples:
   zsh:   echo 'eval "$(cmdflare completion zsh)"'  >> ~/.zshrc
   fish:  cmdflare completion fish > ~/.config/fish/completions/cmdflare.fish`,
   interactive: `${c.bold('cmdflare interactive')} [<resource>...]   Menu-driven mode: search commands, fill parameters with prompts, run, and get the equivalent command line.`,
-  help: `${c.bold('cmdflare help')} [<command path>] [--tree]   Help for a command; --tree prints the full command tree under a path`,
+  help: `${c.bold('cmdflare help')} [<command path>] [--tree]   Help for a command; --tree prints the full command tree under a path
+  Add --json for structured help (agents).`,
+  skill: `${c.bold('cmdflare skill')}   Print the agent skill (how LLMs should call cmdflare).`,
 };
 
-export function runBuiltinHelp(name: string): number {
+export function builtinHelpText(name: string): string {
   const key = name === 'i' ? 'interactive' : name;
-  process.stdout.write((BUILTIN_HELP[key] ?? `No help for ${name}`) + '\n');
+  return BUILTIN_HELP[key] ?? `No help for ${name}`;
+}
+
+export function runBuiltinHelp(name: string, gf: Record<string, any> = {}): number {
+  const key = name === 'i' ? 'interactive' : name;
+  const text = builtinHelpText(key);
+  writeHelp(gf, text, builtinHelpData(key, text));
   return EXIT.OK;
 }

@@ -24,4 +24,6 @@ if (!result.success) {
 mkdirSync(join(DIST, 'generated'), { recursive: true });
 cpSync(join(ROOT, 'src/generated/index.json'), join(DIST, 'generated/index.json'));
 cpSync(join(ROOT, 'src/generated/resources'), join(DIST, 'generated/resources'), { recursive: true });
-console.log('Built dist/cli.js + dist/generated');
+mkdirSync(join(DIST, 'skills/cmdflare'), { recursive: true });
+cpSync(join(ROOT, 'skills/cmdflare/SKILL.md'), join(DIST, 'skills/cmdflare/SKILL.md'));
+console.log('Built dist/cli.js + dist/generated + dist/skills');

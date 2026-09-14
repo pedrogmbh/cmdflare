@@ -5,7 +5,8 @@ import { CliError, EXIT, UsageError, formatError } from '../core/errors';
 import { formatOutput } from '../core/output';
 import { detectTokenFormat, verifyApiToken, type TokenVerifyResult } from '../core/token';
 import { c, canPrompt, log, stdoutIsTTY, withSpinner } from '../core/ui';
-import { BUILTIN_HELP } from './index';
+import { builtinHelpData, writeHelp } from '../core/help';
+import { builtinHelpText } from './index';
 
 function promptContext() {
   return { output: process.stderr, input: process.stdin };
@@ -14,7 +15,7 @@ function promptContext() {
 export async function runAuth(args: string[], gf: Record<string, any>, _argv: string[], version: string): Promise<number> {
   const sub = args[0] ?? (gf.help ? 'help' : 'status');
   if (gf.help || sub === 'help') {
-    process.stdout.write(BUILTIN_HELP.auth + '\n');
+    writeHelp(gf, builtinHelpText('auth'), builtinHelpData('auth', builtinHelpText('auth')));
     return EXIT.OK;
   }
   switch (sub) {

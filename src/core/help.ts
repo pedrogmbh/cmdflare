@@ -3,7 +3,8 @@ import { flagName } from './names';
 import { GLOBAL_NAMES, globalShort } from './globals';
 import { commandPath, countMethods, loadIndex } from './manifest';
 import type { MethodNode, ParamProp, ResourceNode, TypeSpec } from './manifest-types';
-import { c, termWidth } from './ui';
+import { formatOutput } from './output';
+import { c, stripAnsi, termWidth } from './ui';
 
 export const BIN = 'cmdflare';
 
@@ -47,6 +48,7 @@ export const BUILTIN_COMMANDS: Array<[string, string]> = [
   ['interactive', 'Guided, menu-driven mode (also: cmdflare with no arguments on a TTY)'],
   ['completion', 'Print shell completion script (bash, zsh, fish)'],
   ['help', 'Help for a command path, or `help --tree` for the whole command tree'],
+  ['skill', 'Print the agent skill (how LLMs should use cmdflare)'],
 ];
 
 export function wrap(text: string, width: number, indent = 0): string {
@@ -357,4 +359,114 @@ export function renderTree(node: ResourceNode, prefix = '', depth = 0, maxDepth 
     lines.push(renderTree(ch, prefix + '  ', depth + 1, maxDepth));
   }
   return lines.filter((l) => l !== '').join('\n');
+}
+
+export function wantsJsonHelp(gf: { json?: boolean; output?: string }): boolean {
+  return !!(gf.json || gf.output === 'json');
+}
+
+export function writeHelp(gf: { json?: boolean; output?: string; compact?: boolean }, text: string, data: unknown): void {
+  if (wantsJsonHelp(gf)) process.stdout.write(formatOutput(data, { format: 'json', compact: !!gf.compact }) + '\n');
+  else process.stdout.write(text + '\n');
+}
+
+function firstPara(d?: string): string | undefined {
+  if (!d) return undefined;
+  const t = d.split(/\n\s*\n/)[0]!.replace(/\s+/g, ' ').trim();
+  return t || undefined;
+}
+
+export function typeJson(t: TypeSpec): Record<string, unknown> {
+  const out: Record<string, unknown> = { kind: t.kind };
+  if (t.enum) out.enum = t.enum;
+  if (t.items) out.items = typeJson(t.items);
+  if (t.props?.length) {
+    out.props = t.props.map((p) => ({
+      name: p.name,
+      required: p.required,
+      type: typeJson(p.type),
+      ...(firstPara(p.description) ? { description: firstPara(p.description) } : {}),
+    }));
+  }
+  if (t.members?.length) out.members = t.members.map(typeJson);
+  if (t.nullable) out.nullable = true;
+  return out;
+}
+
+export function rootHelpData(version: string): Record<string, unknown> {
+  const idx = loadIndex();
+  return {
+    kind: 'root',
+    version,
+    sdk: idx.sdkVersion,
+    commands: countMethods(idx.root),
+    discovery: ['cmdflare search <terms> --json', 'cmdflare <command> --help --json', 'cmdflare skill'],
+    builtins: BUILTIN_COMMANDS.map(([cli, summary]) => ({ cli, summary })),
+    resources: idx.root.children.map((ch) => ch.cli),
+  };
+}
+
+export function resourceHelpData(path: ResourceNode[], node: ResourceNode): Record<string, unknown> {
+  return {
+    kind: 'resource',
+    command: commandPath(path),
+    ...(firstPara(node.description) ? { summary: firstPara(node.description) } : {}),
+    commands: countMethods(node),
+    methods: node.methods.map((m) => ({
+      cli: m.cli,
+      summary: m.summary,
+      http: m.http,
+      path: m.path,
+      ...(m.deprecated ? { deprecated: true } : {}),
+    })),
+    children: node.children.map((ch) => ({ cli: ch.cli, commands: countMethods(ch) })),
+  };
+}
+
+export function methodHelpData(path: ResourceNode[], method: MethodNode): Record<string, unknown> {
+  const cp = commandPath(path, method);
+  const pos = method.positionals.map((p) => (p.required ? `<${p.cli}>` : `[${p.cli}]`)).join(' ');
+  const props = method.params?.type.props ?? [];
+  return {
+    kind: 'method',
+    command: cp,
+    usage: `${BIN} ${cp}${pos ? ' ' + pos : ''} [flags]`,
+    summary: method.summary,
+    ...(firstPara(method.description) ? { description: firstPara(method.description) } : {}),
+    http: method.http,
+    path: method.path,
+    ...(method.deprecated ? { deprecated: true, deprecated_note: method.deprecatedNote } : {}),
+    ...(method.destructive ? { destructive: true } : {}),
+    ...(method.paginated ? { paginated: method.paginated } : {}),
+    ...(method.binary ? { binary: true } : {}),
+    ...(method.multipart ? { multipart: true } : {}),
+    positionals: method.positionals.map((p) => ({
+      cli: p.cli,
+      name: p.name,
+      required: p.required,
+      type: p.type,
+      ...(firstPara(p.description) ? { description: firstPara(p.description) } : {}),
+    })),
+    params: props.map((p) => paramHelpJson(p)),
+    example: exampleFor(cp, method),
+  };
+}
+
+function paramHelpJson(p: ParamProp): Record<string, unknown> {
+  const context = isContextParam(p.name);
+  const flag = p.name === 'zone_id' ? 'zone' : p.name === 'account_id' ? 'account' : flagName(p.name);
+  return {
+    flag,
+    name: p.name,
+    required: p.required,
+    ...(context ? { context: true } : {}),
+    ...(p.location ? { location: p.location } : {}),
+    type: typeJson(p.type),
+    ...(firstPara(p.description) ? { description: firstPara(p.description) } : {}),
+    ...(p.deprecated ? { deprecated: true } : {}),
+  };
+}
+
+export function builtinHelpData(command: string, text: string): Record<string, unknown> {
+  return { kind: 'builtin', command, text: stripAnsi(text) };
 }

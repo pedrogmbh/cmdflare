@@ -4,7 +4,8 @@ import { EXIT, UsageError } from '../core/errors';
 import { formatOutput } from '../core/output';
 import { clearNameCache } from '../core/resolve';
 import { c, log, stdoutIsTTY } from '../core/ui';
-import { BUILTIN_HELP } from './index';
+import { builtinHelpData, writeHelp } from '../core/help';
+import { builtinHelpText } from './index';
 
 const PROFILE_KEYS: Array<keyof Profile> = ['account_id', 'zone_id', 'api_token', 'api_key', 'email', 'user_service_key', 'base_url'];
 const SETTING_KEYS = ['output', 'color', 'per_page'];
@@ -13,7 +14,7 @@ const SECRET_KEYS = new Set(['api_token', 'api_key', 'user_service_key']);
 export async function runConfig(args: string[], gf: Record<string, any>): Promise<number> {
   const sub = args[0];
   if (!sub || gf.help || sub === 'help') {
-    process.stdout.write(BUILTIN_HELP.config + '\n');
+    writeHelp(gf, builtinHelpText('config'), builtinHelpData('config', builtinHelpText('config')));
     return EXIT.OK;
   }
   const cfg = loadConfig();

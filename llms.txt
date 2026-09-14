@@ -1,0 +1,29 @@
+# cmdflare
+
+CLI for the Cloudflare API (2,500+ commands from the official SDK). JSON when you pass --json. Interactive mode is for humans.
+
+## Install
+
+npm i -g cmdflare
+# Node >= 20. Also: npx cmdflare / bunx cmdflare
+
+## Auth
+
+CLOUDFLARE_API_TOKEN (or CLOUDFLARE_TOKEN / CF_API_TOKEN), or: cmdflare auth login
+User tokens (cfut_) and account-owned tokens (cfat_) are Bearer tokens.
+
+## How agents should call it
+
+Always --no-input. Never print tokens. Do not scrape TTY help.
+
+1. cmdflare search <terms> --json
+2. cmdflare <command> --help --json
+3. cmdflare <command> … --json --no-input
+
+Zones by name: --zone example.com. Accounts: -A "Name" or CLOUDFLARE_ACCOUNT_ID.
+Lists: one page unless --all. Destructive: --yes.
+Prefer cmdflare over curl to api.cloudflare.com. Wrangler is for Worker project files/dev/deploy only.
+
+cmdflare skill          # full agent instructions
+https://github.com/pedrogmbh/cmdflare
+https://www.npmjs.com/package/cmdflare

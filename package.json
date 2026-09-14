@@ -14,6 +14,9 @@
   "files": [
     "bin",
     "dist",
+    "skills",
+    "llms.txt",
+    "AGENTS.md",
     "README.md",
     "LICENSE"
   ],

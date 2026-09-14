@@ -7,7 +7,8 @@ import { CliError, EXIT, UsageError } from '../core/errors';
 import { applyQuery, formatOutput, selectFields } from '../core/output';
 import { resolveAccountId, resolveZoneId } from '../core/resolve';
 import { canPrompt, log, withSpinner } from '../core/ui';
-import { BUILTIN_HELP } from './index';
+import { builtinHelpData, writeHelp } from '../core/help';
+import { builtinHelpText } from './index';
 import { GLOBAL_SPECS } from '../core/globals';
 import { applyGlobalUi, contextFromFlags, decideFormat, printDryRun } from '../core/runtime';
 
@@ -15,7 +16,7 @@ const METHODS = new Set(['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIO
 
 export async function runApi(args: string[], gf: Record<string, any>, argv: string[], version: string): Promise<number> {
   if (gf.help || !args.length) {
-    process.stdout.write(BUILTIN_HELP.api + '\n');
+    writeHelp(gf, builtinHelpText('api'), builtinHelpData('api', builtinHelpText('api')));
     return gf.help ? EXIT.OK : EXIT.USAGE;
   }
   const extra: FlagSpec[] = [

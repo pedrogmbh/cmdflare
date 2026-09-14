@@ -42,6 +42,18 @@ Run `cmdflare` with no arguments. Type `dns records`, pick a zone by name, fill 
 
 Same idea for a partial path: `cmdflare dns records` opens that menu. On a TTY, missing flags are prompted instead of failing — `cmdflare dns records get` will ask for the record and the zone.
 
+## For agents
+
+cmdflare is not in model training data. Discover at runtime — do not scrape TTY help:
+
+```
+cmdflare search dns records --json
+cmdflare dns records list --help --json
+cmdflare dns records list --zone example.com --json --no-input
+```
+
+Full instructions: `cmdflare skill` (also `skills/cmdflare/SKILL.md`, `llms.txt`, `AGENTS.md`).
+
 ## Commands
 
 ```

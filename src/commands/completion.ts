@@ -1,8 +1,9 @@
 /** Shell completion scripts and the hidden __complete query. */
 import { EXIT, UsageError } from '../core/errors';
+import { builtinHelpData, writeHelp } from '../core/help';
 import { loadIndex, resolveCommand, getMethodDetail } from '../core/manifest';
 import { flagName } from '../core/names';
-import { BUILTIN_NAMES } from './index';
+import { builtinHelpText, BUILTIN_NAMES } from './index';
 
 const BASH = `# bash completion for cmdflare
 _cmdflare_complete() {
@@ -39,7 +40,7 @@ complete -c cmdflare -f -a '(__cmdflare_complete)'
 export async function runCompletion(args: string[], gf: Record<string, any>): Promise<number> {
   const shell = args[0];
   if (gf.help || !shell) {
-    process.stdout.write('Usage: cmdflare completion <bash|zsh|fish>\n');
+    writeHelp(gf, builtinHelpText('completion'), builtinHelpData('completion', builtinHelpText('completion')));
     return shell ? EXIT.OK : EXIT.USAGE;
   }
   switch (shell) {
